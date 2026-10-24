@@ -1,10 +1,14 @@
+mod action_joueur;
 mod caracteristiques;
+mod combat;
 mod de;
 mod ennemi;
 mod objet;
 mod personnage;
 
+pub use action_joueur::ActionJoueur;
 pub use caracteristiques::{modificateur, Caracteristiques};
+pub use combat::{determiner_ordre_initiative, resoudre_attaque, Combat, ResolutionAttaque, Vainqueur};
 pub use de::{De, JetDe};
 pub use ennemi::Ennemi;
 pub use objet::{EffetObjet, Objet};
