@@ -1,14 +1,13 @@
-use application::ports::narrateur::{ContexteTour, ErreurNarrateur, Narrateur, ReponseMj};
+use application::ports::narrateur::{ContexteResultat, ContexteTour, ErreurNarrateur, Narrateur};
 use domain::{ActionJoueur, EffetObjet};
 
 pub struct FauxNarrateur;
 
 impl Narrateur for FauxNarrateur {
-    fn raconter(
+    fn proposer_action(
         &mut self,
         contexte: &ContexteTour,
-        sur_fragment: &mut dyn FnMut(&str),
-    ) -> Result<ReponseMj, ErreurNarrateur> {
+    ) -> Result<ActionJoueur, ErreurNarrateur> {
         let saisie_minuscule = contexte.saisie_joueur.to_lowercase();
 
         let action = if saisie_minuscule.contains("attaque") || saisie_minuscule.contains("frappe") {
@@ -25,12 +24,24 @@ impl Narrateur for FauxNarrateur {
             ActionJoueur::ActionLibre(contexte.saisie_joueur.clone())
         };
 
-        let narration = format!("Tu tentes : \"{}\"...", contexte.saisie_joueur);
+        Ok(action)
+    }
+
+    fn raconter_resultat(
+        &mut self,
+        contexte: &ContexteResultat,
+        sur_fragment: &mut dyn FnMut(&str),
+    ) -> Result<String, ErreurNarrateur> {
+        let resultat = if contexte.resume_mecanique.is_empty() {
+            "Rien de notable ne se produit.".to_string()
+        } else {
+            contexte.resume_mecanique.join(" ")
+        };
+        let narration = format!("Tu as tenté quelque chose... {}", resultat);
         for mot in narration.split_inclusive(' ') {
             sur_fragment(mot);
         }
-
-        Ok(ReponseMj { narration, action_proposee: action })
+        Ok(narration)
     }
 }
 
@@ -91,41 +102,61 @@ mod tests {
     fn attaque_propose_d_attaquer_le_premier_ennemi_vivant() {
         let ctx = contexte("J'attaque le gobelin", Some(combat_avec_gobelin()));
         let mut narrateur = FauxNarrateur;
-        let reponse = narrateur.raconter(&ctx, &mut |_| {}).unwrap();
-        assert_eq!(reponse.action_proposee, ActionJoueur::Attaquer { cible: "Gobelin".into() });
+        let action = narrateur.proposer_action(&ctx).unwrap();
+        assert_eq!(action, ActionJoueur::Attaquer { cible: "Gobelin".into() });
     }
 
     #[test]
     fn potion_propose_d_utiliser_la_potion_en_inventaire() {
         let ctx = contexte("Je bois une potion de soin", None);
         let mut narrateur = FauxNarrateur;
-        let reponse = narrateur.raconter(&ctx, &mut |_| {}).unwrap();
-        assert_eq!(reponse.action_proposee, ActionJoueur::UtiliserObjet { objet: "Potion de soin".into() });
+        let action = narrateur.proposer_action(&ctx).unwrap();
+        assert_eq!(action, ActionJoueur::UtiliserObjet { objet: "Potion de soin".into() });
     }
 
     #[test]
     fn fuite_propose_de_fuir() {
         let ctx = contexte("Je fuis !", Some(combat_avec_gobelin()));
         let mut narrateur = FauxNarrateur;
-        let reponse = narrateur.raconter(&ctx, &mut |_| {}).unwrap();
-        assert_eq!(reponse.action_proposee, ActionJoueur::Fuir);
+        let action = narrateur.proposer_action(&ctx).unwrap();
+        assert_eq!(action, ActionJoueur::Fuir);
     }
 
     #[test]
     fn texte_sans_mot_cle_devient_une_action_libre() {
         let ctx = contexte("J'observe les environs", None);
         let mut narrateur = FauxNarrateur;
-        let reponse = narrateur.raconter(&ctx, &mut |_| {}).unwrap();
-        assert_eq!(reponse.action_proposee, ActionJoueur::ActionLibre("J'observe les environs".into()));
+        let action = narrateur.proposer_action(&ctx).unwrap();
+        assert_eq!(action, ActionJoueur::ActionLibre("J'observe les environs".into()));
     }
 
     #[test]
-    fn la_narration_est_streamee_fragment_par_fragment() {
-        let ctx = contexte("J'observe", None);
+    fn la_narration_du_resultat_est_streamee_fragment_par_fragment() {
+        let ctx = contexte("peu importe", None);
+        let ctx_resultat = ContexteResultat {
+            etat: ctx.etat,
+            action: ActionJoueur::ActionLibre("J'observe".into()),
+            resume_mecanique: vec![],
+        };
         let mut narrateur = FauxNarrateur;
         let mut fragments = Vec::new();
-        let reponse = narrateur.raconter(&ctx, &mut |frag| fragments.push(frag.to_string())).unwrap();
-        assert_eq!(fragments.concat(), reponse.narration);
+        let narration = narrateur
+            .raconter_resultat(&ctx_resultat, &mut |frag| fragments.push(frag.to_string()))
+            .unwrap();
+        assert_eq!(fragments.concat(), narration);
         assert!(fragments.len() > 1);
+    }
+
+    #[test]
+    fn la_narration_du_resultat_reprend_le_resume_mecanique() {
+        let ctx = contexte("peu importe", None);
+        let ctx_resultat = ContexteResultat {
+            etat: ctx.etat,
+            action: ActionJoueur::Attaquer { cible: "Gobelin".into() },
+            resume_mecanique: vec!["🎲 Tu attaques Gobelin : touché ! Dégâts : 5".to_string()],
+        };
+        let mut narrateur = FauxNarrateur;
+        let narration = narrateur.raconter_resultat(&ctx_resultat, &mut |_| {}).unwrap();
+        assert!(narration.contains("touché"));
     }
 }

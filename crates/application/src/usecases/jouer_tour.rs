@@ -1,5 +1,5 @@
 use crate::ports::generateur_de::GenerateurDe;
-use crate::ports::narrateur::{ContexteTour, Narrateur, ReponseMj};
+use crate::ports::narrateur::{ContexteResultat, ContexteTour, Narrateur};
 use domain::{resoudre_attaque, ActionJoueur, De, EffetObjet, EtatPartie, Vainqueur};
 
 #[derive(Debug, PartialEq)]
@@ -162,12 +162,12 @@ impl JouerTour {
         de: &mut dyn GenerateurDe,
         sur_fragment: &mut dyn FnMut(&str),
     ) -> Result<ResultatTour, ErreurTour> {
-        let contexte = ContexteTour {
+        let contexte_tour = ContexteTour {
             etat: etat.clone(),
             saisie_joueur: saisie.to_string(),
         };
-        let ReponseMj { narration, action_proposee } = narrateur
-            .raconter(&contexte, sur_fragment)
+        let action_proposee = narrateur
+            .proposer_action(&contexte_tour)
             .map_err(|_| ErreurTour::EchecNarrateur)?;
 
         valider_action(&action_proposee, etat)?;
@@ -204,6 +204,15 @@ impl JouerTour {
                 }
             }
         }
+
+        let contexte_resultat = ContexteResultat {
+            etat: etat.clone(),
+            action: action_proposee,
+            resume_mecanique: resume.clone(),
+        };
+        let narration = narrateur
+            .raconter_resultat(&contexte_resultat, sur_fragment)
+            .map_err(|_| ErreurTour::EchecNarrateur)?;
 
         Ok(ResultatTour {
             narration,
@@ -355,23 +364,24 @@ mod tests {
         assert!(resume.is_empty());
     }
 
-    use crate::ports::narrateur::{ContexteTour, ErreurNarrateur, Narrateur, ReponseMj};
+    use crate::ports::narrateur::{ContexteResultat, ContexteTour, ErreurNarrateur, Narrateur};
 
     struct NarrateurDeTest {
         action: ActionJoueur,
     }
 
     impl Narrateur for NarrateurDeTest {
-        fn raconter(
+        fn proposer_action(&mut self, _contexte: &ContexteTour) -> Result<ActionJoueur, ErreurNarrateur> {
+            Ok(self.action.clone())
+        }
+
+        fn raconter_resultat(
             &mut self,
-            _contexte: &ContexteTour,
+            _contexte: &ContexteResultat,
             sur_fragment: &mut dyn FnMut(&str),
-        ) -> Result<ReponseMj, ErreurNarrateur> {
+        ) -> Result<String, ErreurNarrateur> {
             sur_fragment("narration de test");
-            Ok(ReponseMj {
-                narration: "narration de test".to_string(),
-                action_proposee: self.action.clone(),
-            })
+            Ok("narration de test".to_string())
         }
     }
 
@@ -434,5 +444,45 @@ mod tests {
         let mut de = GenerateurDeSeed::nouveau(vec![]);
         let resultat = JouerTour::executer(&mut etat, "j'attaque", &mut narrateur, &mut de, &mut |_| {});
         assert!(matches!(resultat, Err(ErreurTour::AucunCombatEnCours)));
+    }
+
+    use std::cell::RefCell;
+
+    struct NarrateurEspion {
+        action: ActionJoueur,
+        contexte_resultat_recu: RefCell<Option<ContexteResultat>>,
+    }
+
+    impl Narrateur for NarrateurEspion {
+        fn proposer_action(&mut self, _contexte: &ContexteTour) -> Result<ActionJoueur, ErreurNarrateur> {
+            Ok(self.action.clone())
+        }
+
+        fn raconter_resultat(
+            &mut self,
+            contexte: &ContexteResultat,
+            _sur_fragment: &mut dyn FnMut(&str),
+        ) -> Result<String, ErreurNarrateur> {
+            *self.contexte_resultat_recu.borrow_mut() = Some(contexte.clone());
+            Ok(String::new())
+        }
+    }
+
+    #[test]
+    fn jouer_tour_informe_la_narration_avec_le_resultat_mecanique_reel() {
+        let mut etat = etat_en_combat();
+        let mut narrateur = NarrateurEspion {
+            action: ActionJoueur::Attaquer { cible: "Gobelin".into() },
+            contexte_resultat_recu: RefCell::new(None),
+        };
+        // attaque: d20=10 + mod_dex(14)=2 => 12 >= defense 12 (touché) ; dégâts d4=3 (mains nues)
+        // le gobelin (7 pv) survit, donc il agit ensuite : d20=1 + bonus_attaque 3 = 4 < défense 12 (manqué)
+        let mut de = GenerateurDeSeed::nouveau(vec![10, 3, 1, 1]);
+        JouerTour::executer(&mut etat, "j'attaque le gobelin", &mut narrateur, &mut de, &mut |_| {}).unwrap();
+
+        let contexte_recu = narrateur.contexte_resultat_recu.borrow();
+        let contexte_recu = contexte_recu.as_ref().expect("raconter_resultat aurait dû être appelé");
+        assert!(contexte_recu.resume_mecanique.iter().any(|l| l.contains("touché")));
+        assert_eq!(contexte_recu.action, ActionJoueur::Attaquer { cible: "Gobelin".into() });
     }
 }
