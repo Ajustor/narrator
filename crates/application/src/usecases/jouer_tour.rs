@@ -1,13 +1,18 @@
 use crate::ports::generateur_de::GenerateurDe;
-use crate::ports::narrateur::{ContexteResultat, ContexteTour, Narrateur};
+use crate::ports::narrateur::{ContexteResultat, ContexteTour, ErreurNarrateur, Narrateur};
 use domain::{resoudre_attaque, ActionJoueur, De, EffetObjet, EtatPartie, Vainqueur};
+
+fn message_echec_narrateur(erreur: ErreurNarrateur) -> ErreurTour {
+    let ErreurNarrateur::EchecGeneration(message) = erreur;
+    ErreurTour::EchecNarrateur(message)
+}
 
 #[derive(Debug, PartialEq)]
 pub enum ErreurTour {
     AucunCombatEnCours,
     CibleInvalide,
     ObjetInvalide,
-    EchecNarrateur,
+    EchecNarrateur(String),
 }
 
 pub fn valider_action(action: &ActionJoueur, etat: &EtatPartie) -> Result<(), ErreurTour> {
@@ -168,7 +173,7 @@ impl JouerTour {
         };
         let action_proposee = narrateur
             .proposer_action(&contexte_tour)
-            .map_err(|_| ErreurTour::EchecNarrateur)?;
+            .map_err(message_echec_narrateur)?;
 
         valider_action(&action_proposee, etat)?;
 
@@ -212,7 +217,7 @@ impl JouerTour {
         };
         let narration = narrateur
             .raconter_resultat(&contexte_resultat, sur_fragment)
-            .map_err(|_| ErreurTour::EchecNarrateur)?;
+            .map_err(message_echec_narrateur)?;
 
         Ok(ResultatTour {
             narration,
