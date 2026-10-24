@@ -69,10 +69,48 @@ pub fn construire_schema_action(etat: &EtatPartie) -> Value {
     serde_json::json!({ "oneOf": variantes })
 }
 
+#[derive(Debug, PartialEq)]
+pub struct ErreurInterpretation(pub String);
+
+pub fn interpreter_json_action(json_brut: &str) -> Result<domain::ActionJoueur, ErreurInterpretation> {
+    use domain::ActionJoueur;
+
+    let valeur: Value = serde_json::from_str(json_brut)
+        .map_err(|e| ErreurInterpretation(format!("JSON invalide : {e}")))?;
+
+    let action = valeur
+        .get("action")
+        .and_then(Value::as_str)
+        .ok_or_else(|| ErreurInterpretation("champ \"action\" manquant".to_string()))?;
+
+    match action {
+        "attaquer" => {
+            let cible = valeur
+                .get("cible")
+                .and_then(Value::as_str)
+                .ok_or_else(|| ErreurInterpretation("champ \"cible\" manquant".to_string()))?;
+            Ok(ActionJoueur::Attaquer { cible: cible.to_string() })
+        }
+        "utiliser_objet" => {
+            let objet = valeur
+                .get("objet")
+                .and_then(Value::as_str)
+                .ok_or_else(|| ErreurInterpretation("champ \"objet\" manquant".to_string()))?;
+            Ok(ActionJoueur::UtiliserObjet { objet: objet.to_string() })
+        }
+        "fuir" => Ok(ActionJoueur::Fuir),
+        "libre" => {
+            let texte = valeur.get("texte").and_then(Value::as_str).unwrap_or("").to_string();
+            Ok(ActionJoueur::ActionLibre(texte))
+        }
+        autre => Err(ErreurInterpretation(format!("action inconnue : {autre}"))),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use domain::{Caracteristiques, Combat, De, Ennemi, Objet, Personnage};
+    use domain::{ActionJoueur, Caracteristiques, Combat, De, Ennemi, Objet, Personnage};
 
     fn personnage_test(inventaire: Vec<Objet>) -> Personnage {
         Personnage::nouveau(
@@ -188,5 +226,53 @@ mod tests {
         let schema = construire_schema_action(&etat);
         let variantes = schema["oneOf"].as_array().unwrap();
         assert!(variantes.iter().all(|v| v["properties"]["action"]["const"] != "fuir"));
+    }
+
+    #[test]
+    fn interprete_une_attaque() {
+        let action = interpreter_json_action(r#"{"action":"attaquer","cible":"Gobelin"}"#).unwrap();
+        assert_eq!(action, ActionJoueur::Attaquer { cible: "Gobelin".into() });
+    }
+
+    #[test]
+    fn interprete_l_utilisation_d_un_objet() {
+        let action = interpreter_json_action(r#"{"action":"utiliser_objet","objet":"Potion de soin"}"#).unwrap();
+        assert_eq!(action, ActionJoueur::UtiliserObjet { objet: "Potion de soin".into() });
+    }
+
+    #[test]
+    fn interprete_une_fuite() {
+        let action = interpreter_json_action(r#"{"action":"fuir"}"#).unwrap();
+        assert_eq!(action, ActionJoueur::Fuir);
+    }
+
+    #[test]
+    fn interprete_une_action_libre() {
+        let action = interpreter_json_action(r#"{"action":"libre","texte":"J'observe"}"#).unwrap();
+        assert_eq!(action, ActionJoueur::ActionLibre("J'observe".into()));
+    }
+
+    #[test]
+    fn un_json_invalide_echoue() {
+        let resultat = interpreter_json_action("ceci n'est pas du json");
+        assert!(resultat.is_err());
+    }
+
+    #[test]
+    fn un_champ_action_manquant_echoue() {
+        let resultat = interpreter_json_action(r#"{"cible":"Gobelin"}"#);
+        assert!(resultat.is_err());
+    }
+
+    #[test]
+    fn une_attaque_sans_cible_echoue() {
+        let resultat = interpreter_json_action(r#"{"action":"attaquer"}"#);
+        assert!(resultat.is_err());
+    }
+
+    #[test]
+    fn une_action_inconnue_echoue() {
+        let resultat = interpreter_json_action(r#"{"action":"voler"}"#);
+        assert!(resultat.is_err());
     }
 }
