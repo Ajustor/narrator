@@ -6,7 +6,7 @@ use llama_cpp_2::context::params::LlamaContextParams;
 use llama_cpp_2::llama_backend::LlamaBackend;
 use llama_cpp_2::llama_batch::LlamaBatch;
 use llama_cpp_2::model::params::LlamaModelParams;
-use llama_cpp_2::model::LlamaModel;
+use llama_cpp_2::model::{LlamaChatMessage, LlamaModel};
 use llama_cpp_2::sampling::LlamaSampler;
 use std::num::NonZeroU32;
 use std::path::Path;
@@ -54,7 +54,32 @@ impl LlamaNarrateur {
             .new_context(&self.backend, self.ctx_params.clone())
             .map_err(|e| format!("échec de création du contexte : {e}"))?;
 
-        let tokens_prompt = self.model.vocab().tokenize(prompt.as_bytes(), true, true);
+        // Le modèle visé (Qwen2.5-3B-Instruct) est instruction-tuned et
+        // attend un prompt formaté avec son chat template (balises
+        // <|im_start|>/<|im_end|>), pas du texte brut façon "completion".
+        // API vérifiée dans la source installée de llama-cpp-2 0.1.160
+        // (cargo registry cache), `src/model.rs` :
+        // - `LlamaModel::chat_template(&self, name: Option<&str>) ->
+        //   Result<LlamaChatTemplate, ChatTemplateError>` (model.rs:319)
+        // - `LlamaChatMessage::new(role: String, content: String) ->
+        //   Result<Self, NewLlamaChatMessageError>` (model.rs:100)
+        // - `LlamaModel::apply_chat_template(&self, tmpl: &LlamaChatTemplate,
+        //   chat: &[LlamaChatMessage], add_ass: bool) ->
+        //   Result<String, ApplyChatTemplateError>` (model.rs:541) — `add_ass`
+        //   is indeed "add assistant" (add the opening assistant tag so
+        //   generation can continue directly), set to `true` here.
+        let gabarit_discussion = self
+            .model
+            .chat_template(None)
+            .map_err(|e| format!("échec de récupération du template de discussion : {e}"))?;
+        let message = LlamaChatMessage::new("user".to_string(), prompt.to_string())
+            .map_err(|e| format!("échec de construction du message de discussion : {e}"))?;
+        let prompt_formate = self
+            .model
+            .apply_chat_template(&gabarit_discussion, &[message], true)
+            .map_err(|e| format!("échec d'application du template de discussion : {e}"))?;
+
+        let tokens_prompt = self.model.vocab().tokenize(prompt_formate.as_bytes(), true, true);
         let mut batch = LlamaBatch::new(512, 1);
         let dernier = (tokens_prompt.len() - 1) as i32;
         for (i, token) in (0_i32..).zip(tokens_prompt.into_iter()) {
