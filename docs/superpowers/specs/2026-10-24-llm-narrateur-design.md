@@ -52,9 +52,10 @@ pub struct ContexteResultat {
 
 1. `narrateur.proposer_action(&contexte_tour)` → `ActionJoueur` (LLM, génération contrainte par grammaire — pas de streaming, jamais montré au joueur)
 2. `valider_action(&action, etat)` (inchangé)
-3. Résolution mécanique du joueur : `resoudre_action_joueur` ou la branche `Fuir`/`ActionLibre` (inchangé — dés + dégâts via `GenerateurDe`, toujours dans `application`/`domain`, jamais dans le LLM)
-4. `narrateur.raconter_resultat(&contexte_resultat, sur_fragment)` → narration streamée au joueur, informée par le résultat réel
-5. Résolution du côté ennemi (inchangé — toujours déterministe en code, jamais via le LLM)
+3. Résolution mécanique complète du tour — joueur et ennemi, dans l'ordre que l'initiative dicte déjà (`ennemi_agit_avant_joueur`), logique de branchement existante inchangée (toujours déterministe en code, dés via `GenerateurDe`, jamais dans le LLM)
+4. `narrateur.raconter_resultat(&contexte_resultat, sur_fragment)` → narration streamée au joueur, informée par l'ensemble du résultat mécanique du tour (`resume_mecanique` complet, joueur + ennemi)
+
+Narration appelée une seule fois, à la fin, après que tous les dés du tour (joueur et ennemi) ont été résolus — pas seulement ceux du joueur — pour éviter le cas particulier où le joueur meurt avant d'avoir pu agir (ennemi plus rapide) et où il n'y aurait sinon rien de cohérent à raconter sur une action jamais résolue.
 
 ## Appel 1 — classification de l'action (`proposer_action`)
 
