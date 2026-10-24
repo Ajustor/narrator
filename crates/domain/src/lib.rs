@@ -3,6 +3,7 @@ mod caracteristiques;
 mod combat;
 mod de;
 mod ennemi;
+mod etat_partie;
 mod objet;
 mod personnage;
 
@@ -11,5 +12,6 @@ pub use caracteristiques::{modificateur, Caracteristiques};
 pub use combat::{determiner_ordre_initiative, resoudre_attaque, Combat, ResolutionAttaque, Vainqueur};
 pub use de::{De, JetDe};
 pub use ennemi::Ennemi;
+pub use etat_partie::EtatPartie;
 pub use objet::{EffetObjet, Objet};
 pub use personnage::Personnage;
