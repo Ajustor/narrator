@@ -1,5 +1,6 @@
 mod creation;
 
+use application::ports::sauvegarde::ErreurSauvegarde;
 use application::usecases::commencer_combat::commencer_combat;
 use application::usecases::jouer_tour::JouerTour;
 use application::usecases::partie::{charger_partie, sauvegarder_partie};
@@ -18,7 +19,7 @@ fn main() {
             println!("Partie reprise pour {}.", etat.personnage.nom);
             etat
         }
-        Err(_) => {
+        Err(ErreurSauvegarde::FichierAbsent) => {
             let personnage = creation::creer_personnage_interactif();
             let gobelin = Ennemi::nouveau("Gobelin".to_string(), 7, De { faces: 6 }, 12, 2, 3);
             let combat = commencer_combat(&personnage, vec![gobelin], &mut de);
@@ -28,6 +29,14 @@ fn main() {
                 combat_en_cours: Some(combat),
                 resumes: Vec::new(),
             }
+        }
+        Err(ErreurSauvegarde::Lecture(message)) => {
+            eprintln!("Erreur de lecture de la sauvegarde : {}", message);
+            std::process::exit(1);
+        }
+        Err(ErreurSauvegarde::Ecriture(message)) => {
+            eprintln!("Erreur d'écriture de la sauvegarde : {}", message);
+            std::process::exit(1);
         }
     };
 
@@ -50,9 +59,10 @@ fn main() {
                 for ligne in &resultat.resume_mecanique {
                     println!("{}", ligne);
                 }
-                sauvegarder_partie(&sauvegarde, &etat).expect("sauvegarde échouée");
 
                 if resultat.combat_termine {
+                    let _ = std::fs::remove_file("partie.json");
+
                     match etat.combat_en_cours.as_ref().and_then(|c| c.vainqueur) {
                         Some(Vainqueur::Joueur) => println!("\nVictoire ! Le gobelin est vaincu."),
                         Some(Vainqueur::Ennemis) => println!("\nTu es tombé au combat..."),
@@ -61,6 +71,8 @@ fn main() {
                     }
                     break;
                 }
+
+                sauvegarder_partie(&sauvegarde, &etat).expect("sauvegarde échouée");
             }
             Err(erreur) => {
                 println!("Action invalide : {:?}", erreur);
