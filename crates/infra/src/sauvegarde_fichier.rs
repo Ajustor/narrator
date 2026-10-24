@@ -31,7 +31,7 @@ impl Sauvegarde for SauvegardeFichier {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use domain::{Caracteristiques, Personnage};
+    use domain::{Caracteristiques, Combat, De, Ennemi, Personnage};
 
     fn chemin_temporaire(nom: &str) -> PathBuf {
         std::env::temp_dir().join(format!("narrateur_test_{}_{}.json", std::process::id(), nom))
@@ -76,6 +76,30 @@ mod tests {
 
         assert_eq!(relu.personnage.nom, etat.personnage.nom);
         assert_eq!(relu.lieu_actuel, etat.lieu_actuel);
+
+        let _ = fs::remove_file(chemin);
+    }
+
+    #[test]
+    fn sauvegarder_puis_charger_preserve_un_combat_en_cours() {
+        let chemin = chemin_temporaire("combat_roundtrip");
+        let sauvegarde = SauvegardeFichier::nouveau(chemin.clone());
+
+        let mut etat = etat_test();
+        let mut gobelin = Ennemi::nouveau("Gobelin".into(), 7, De { faces: 6 }, 12, 2, 3);
+        gobelin.pv_actuels = 3;
+        etat.combat_en_cours = Some(Combat {
+            ennemis: vec![gobelin],
+            ennemi_agit_avant_joueur: true,
+            tour_actuel: 2,
+            termine: false,
+            vainqueur: None,
+        });
+
+        sauvegarde.sauvegarder(&etat).expect("sauvegarde échouée");
+        let relu = sauvegarde.charger().expect("chargement échoué");
+
+        assert_eq!(relu, etat);
 
         let _ = fs::remove_file(chemin);
     }

@@ -1,7 +1,7 @@
 use crate::de::De;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Ennemi {
     pub nom: String,
     pub pv_actuels: i32,

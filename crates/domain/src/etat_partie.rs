@@ -2,7 +2,7 @@ use crate::combat::Combat;
 use crate::personnage::Personnage;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EtatPartie {
     pub personnage: Personnage,
     pub lieu_actuel: String,

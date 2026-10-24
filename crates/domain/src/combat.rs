@@ -9,7 +9,7 @@ pub enum Vainqueur {
     Fuite,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Combat {
     pub ennemis: Vec<Ennemi>,
     pub ennemi_agit_avant_joueur: bool,
