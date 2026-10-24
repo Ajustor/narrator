@@ -177,3 +177,95 @@ impl Narrateur for LlamaNarrateur {
             .map_err(ErreurNarrateur::EchecGeneration)
     }
 }
+#[cfg(test)]
+mod tests {
+    use crate::action_schema::construire_schema_action;
+    use domain::{Caracteristiques, Combat, De, EffetObjet, Ennemi, EtatPartie, Objet, Personnage};
+
+    fn personnage_test(inventaire: Vec<Objet>) -> Personnage {
+        Personnage::nouveau(
+            "Elowen".into(),
+            "Guerrier".into(),
+            Caracteristiques {
+                force: 12,
+                dexterite: 14,
+                constitution: 13,
+                intelligence: 10,
+                sagesse: 10,
+                charisme: 8,
+            },
+            inventaire,
+        )
+    }
+
+    fn etat_sans_rien() -> EtatPartie {
+        EtatPartie {
+            personnage: personnage_test(vec![]),
+            lieu_actuel: "Clairière".into(),
+            combat_en_cours: None,
+            resumes: vec![],
+        }
+    }
+
+    /// Vérifie que le schéma JSON produit par `construire_schema_action`
+    /// pour un état de jeu donné est effectivement convertible en grammaire
+    /// GBNF par `llama_cpp_2::json_schema_to_grammar` — pure conversion de
+    /// chaînes, ne nécessite aucun fichier de modèle.
+    fn verifier_schema_convertible(etat: &EtatPartie) {
+        let schema = construire_schema_action(etat);
+        let gbnf = llama_cpp_2::json_schema_to_grammar(&schema.to_string());
+        assert!(gbnf.is_ok(), "conversion échouée pour {} : {:?}", schema, gbnf.err());
+    }
+
+    #[test]
+    fn le_schema_sans_combat_ni_objet_est_convertible_en_grammaire() {
+        verifier_schema_convertible(&etat_sans_rien());
+    }
+
+    #[test]
+    fn le_schema_avec_un_ennemi_vivant_est_convertible_en_grammaire() {
+        let mut etat = etat_sans_rien();
+        etat.combat_en_cours = Some(Combat {
+            ennemis: vec![Ennemi::nouveau("Gobelin".into(), 7, De { faces: 6 }, 12, 2, 3)],
+            ennemi_agit_avant_joueur: false,
+            tour_actuel: 0,
+            termine: false,
+            vainqueur: None,
+        });
+        verifier_schema_convertible(&etat);
+    }
+
+    #[test]
+    fn le_schema_avec_un_objet_consommable_est_convertible_en_grammaire() {
+        let mut etat = etat_sans_rien();
+        etat.personnage = personnage_test(vec![Objet::potion_de_soin()]);
+        verifier_schema_convertible(&etat);
+    }
+
+    #[test]
+    fn le_schema_avec_combat_actif_et_objet_consommable_est_convertible_en_grammaire() {
+        let mut etat = etat_sans_rien();
+        etat.personnage = personnage_test(vec![Objet::potion_de_soin()]);
+        etat.combat_en_cours = Some(Combat {
+            ennemis: vec![
+                Ennemi::nouveau("Gobelin".into(), 7, De { faces: 6 }, 12, 2, 3),
+                Ennemi::nouveau("Loup".into(), 5, De { faces: 4 }, 11, 3, 2),
+            ],
+            ennemi_agit_avant_joueur: false,
+            tour_actuel: 0,
+            termine: false,
+            vainqueur: None,
+        });
+        verifier_schema_convertible(&etat);
+
+        // S'assure aussi que le filtre "consommable" du schéma (réutilisé
+        // depuis action_schema.rs) exclut bien les armes.
+        etat.personnage.inventaire.push(Objet::epee());
+        assert!(etat
+            .personnage
+            .inventaire
+            .iter()
+            .any(|o| !matches!(o.effet, Some(EffetObjet::Consommable { .. }))));
+        verifier_schema_convertible(&etat);
+    }
+}
