@@ -5,14 +5,22 @@ use application::usecases::commencer_combat::commencer_combat;
 use application::usecases::jouer_tour::JouerTour;
 use application::usecases::partie::{charger_partie, sauvegarder_partie};
 use domain::{De, Ennemi, EtatPartie, Vainqueur};
-use infra::{FauxNarrateur, GenerateurDeOs, SauvegardeFichier};
+use infra::{GenerateurDeOs, LlamaNarrateur, SauvegardeFichier};
 use std::io::{self, Write};
 use std::path::PathBuf;
 
 fn main() {
     let sauvegarde = SauvegardeFichier::nouveau(PathBuf::from("partie.json"));
     let mut de = GenerateurDeOs;
-    let mut narrateur = FauxNarrateur;
+    let chemin_modele = std::env::var("NARRATEUR_MODELE").unwrap_or_else(|_| {
+        eprintln!("La variable d'environnement NARRATEUR_MODELE doit pointer vers un fichier .gguf.");
+        eprintln!("Exemple : NARRATEUR_MODELE=./modeles/qwen2.5-3b-instruct-q4_k_m.gguf cargo run -p app");
+        std::process::exit(1);
+    });
+    let mut narrateur = LlamaNarrateur::charger(std::path::Path::new(&chemin_modele)).unwrap_or_else(|erreur| {
+        eprintln!("Échec du chargement du modèle : {erreur}");
+        std::process::exit(1);
+    });
 
     let mut etat: EtatPartie = match charger_partie(&sauvegarde) {
         Ok(etat) => {
