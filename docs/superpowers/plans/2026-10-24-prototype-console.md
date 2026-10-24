@@ -2237,7 +2237,7 @@ git commit -m "feat(application): add sauvegarder_partie and charger_partie"
 
 **Files:**
 - Create: `crates/infra/src/faux_narrateur.rs`
-- Create: `crates/infra/src/lib.rs`
+- Modify: `crates/infra/src/lib.rs` (created empty by Task 1)
 
 **Interfaces:**
 - Consumes: `application::ports::narrateur::{ContexteTour, ErreurNarrateur, Narrateur, ReponseMj}`, `domain::{ActionJoueur, EffetObjet}`.
