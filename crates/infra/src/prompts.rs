@@ -1,15 +1,17 @@
 use application::ports::narrateur::{ContexteResultat, ContexteTour};
-use domain::EtatPartie;
+use domain::{EffetObjet, EtatPartie};
 
 pub fn construire_prompt_classification(contexte: &ContexteTour) -> String {
     format!(
         "Tu es le maître du jeu d'un jeu de rôle solo en français.\n\
          Le joueur se trouve à : {}.\n\
          {}\
+         {}\
          Le joueur dit : \"{}\"\n\
          Réponds uniquement par un objet JSON décrivant l'action correspondante, sans aucun autre texte.",
         contexte.etat.lieu_actuel,
         description_combat(&contexte.etat),
+        description_personnage(&contexte.etat),
         contexte.saisie_joueur,
     )
 }
@@ -23,10 +25,56 @@ pub fn construire_prompt_narration(contexte: &ContexteResultat) -> String {
     format!(
         "Le joueur a tenté : {:?}.\n\
          Voici ce qui s'est réellement passé : {}\n\
+         {}\
          Raconte cette scène de façon vivante et dramatique, en français, \
          en deux ou trois phrases, sans jamais contredire ces faits ni inventer d'autres chiffres.",
-        contexte.action, resultat,
+        contexte.action, resultat, description_etat_apres_resolution(&contexte.etat),
     )
+}
+
+fn description_personnage(etat: &EtatPartie) -> String {
+    let consommables: Vec<&str> = etat
+        .personnage
+        .inventaire
+        .iter()
+        .filter(|o| matches!(o.effet, Some(EffetObjet::Consommable { .. })))
+        .map(|o| o.nom.as_str())
+        .collect();
+
+    let inventaire = if consommables.is_empty() {
+        "aucun objet consommable".to_string()
+    } else {
+        format!("objets consommables : {}", consommables.join(", "))
+    };
+
+    format!(
+        "Le joueur a {}/{} PV et possède {}.\n",
+        etat.personnage.pv_actuels, etat.personnage.pv_max, inventaire,
+    )
+}
+
+fn description_etat_apres_resolution(etat: &EtatPartie) -> String {
+    let mut ligne = format!(
+        "État actuel : le joueur a {}/{} PV restants.",
+        etat.personnage.pv_actuels, etat.personnage.pv_max
+    );
+
+    if let Some(combat) = &etat.combat_en_cours {
+        if !combat.termine {
+            let survivants: Vec<String> = combat
+                .ennemis
+                .iter()
+                .filter(|e| !e.est_mort())
+                .map(|e| format!("{} ({}/{} PV)", e.nom, e.pv_actuels, e.pv_max))
+                .collect();
+            if !survivants.is_empty() {
+                ligne.push_str(&format!(" Ennemis restants : {}.", survivants.join(", ")));
+            }
+        }
+    }
+
+    ligne.push('\n');
+    ligne
 }
 
 fn description_combat(etat: &EtatPartie) -> String {
@@ -51,7 +99,7 @@ fn description_combat(etat: &EtatPartie) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use domain::{ActionJoueur, Caracteristiques, Combat, De, Ennemi, Personnage};
+    use domain::{ActionJoueur, Caracteristiques, Combat, De, Ennemi, Objet, Personnage};
 
     fn etat_sans_combat() -> EtatPartie {
         EtatPartie {
@@ -130,5 +178,54 @@ mod tests {
         };
         let prompt = construire_prompt_narration(&contexte);
         assert!(!prompt.is_empty());
+    }
+
+    #[test]
+    fn le_prompt_de_classification_mentionne_les_pv_du_joueur() {
+        let contexte = ContexteTour {
+            etat: etat_sans_combat(),
+            saisie_joueur: "J'observe".to_string(),
+        };
+        let prompt = construire_prompt_classification(&contexte);
+        let pv = contexte.etat.personnage.pv_actuels;
+        assert!(prompt.contains(&format!("{}/{}", pv, contexte.etat.personnage.pv_max)));
+    }
+
+    #[test]
+    fn le_prompt_de_classification_mentionne_un_objet_consommable_en_inventaire() {
+        let mut etat = etat_sans_combat();
+        etat.personnage.inventaire.push(Objet::potion_de_soin());
+        let contexte = ContexteTour {
+            etat,
+            saisie_joueur: "J'observe".to_string(),
+        };
+        let prompt = construire_prompt_classification(&contexte);
+        assert!(prompt.contains("Potion de soin"));
+    }
+
+    #[test]
+    fn le_prompt_de_narration_mentionne_les_pv_restants_du_joueur() {
+        let mut etat = etat_sans_combat();
+        etat.personnage.subir_degats(3);
+        let contexte = ContexteResultat {
+            etat: etat.clone(),
+            action: ActionJoueur::ActionLibre("J'observe".into()),
+            resume_mecanique: vec![],
+        };
+        let prompt = construire_prompt_narration(&contexte);
+        assert!(prompt.contains(&format!("{}/{}", etat.personnage.pv_actuels, etat.personnage.pv_max)));
+    }
+
+    #[test]
+    fn le_prompt_de_narration_mentionne_les_pv_d_un_ennemi_survivant() {
+        let etat = etat_en_combat();
+        let contexte = ContexteResultat {
+            etat: etat.clone(),
+            action: ActionJoueur::Attaquer { cible: "Gobelin".into() },
+            resume_mecanique: vec!["🎲 Tu attaques Gobelin : touché ! Dégâts : 2".to_string()],
+        };
+        let prompt = construire_prompt_narration(&contexte);
+        let gobelin = &etat.combat_en_cours.as_ref().unwrap().ennemis[0];
+        assert!(prompt.contains(&format!("{} ({}/{} PV)", gobelin.nom, gobelin.pv_actuels, gobelin.pv_max)));
     }
 }
