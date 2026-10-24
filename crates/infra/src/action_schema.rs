@@ -28,10 +28,9 @@ pub fn construire_schema_action(etat: &EtatPartie) -> Value {
     let mut variantes = vec![serde_json::json!({
         "type": "object",
         "properties": {
-            "action": {"const": "libre"},
-            "texte": {"type": "string"}
+            "action": {"const": "libre"}
         },
-        "required": ["action", "texte"]
+        "required": ["action"]
     })];
 
     if !ennemis_vivants.is_empty() {

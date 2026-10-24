@@ -130,7 +130,16 @@ impl Narrateur for LlamaNarrateur {
         let json_brut = self
             .generer(&prompt, TOKENS_MAX_CLASSIFICATION, Some(&schema.to_string()), &mut |_| {})
             .map_err(ErreurNarrateur::EchecGeneration)?;
-        interpreter_json_action(&json_brut).map_err(|e| ErreurNarrateur::EchecGeneration(e.0))
+        let action = interpreter_json_action(&json_brut).map_err(|e| ErreurNarrateur::EchecGeneration(e.0))?;
+        // Le modèle n'est jamais chargé de reformuler la saisie du joueur : le
+        // schéma JSON pour la variante "libre" ne contient plus de champ
+        // "texte" (voir Fix 4), donc on substitue ici la saisie réelle du
+        // joueur, verbatim — comme le fait déjà `FauxNarrateur`.
+        let action = match action {
+            ActionJoueur::ActionLibre(_) => ActionJoueur::ActionLibre(contexte.saisie_joueur.clone()),
+            autre => autre,
+        };
+        Ok(action)
     }
 
     fn raconter_resultat(
