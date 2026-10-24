@@ -3,7 +3,7 @@ use crate::de::De;
 use crate::objet::{EffetObjet, Objet};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Personnage {
     pub nom: String,
     pub classe: String,
