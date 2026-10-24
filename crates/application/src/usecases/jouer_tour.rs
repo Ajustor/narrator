@@ -172,6 +172,10 @@ impl JouerTour {
 
         valider_action(&action_proposee, etat)?;
 
+        if let Some(combat) = etat.combat_en_cours.as_mut() {
+            combat.tour_actuel += 1;
+        }
+
         let mut resume = Vec::new();
         let fuite = matches!(action_proposee, ActionJoueur::Fuir);
 
@@ -204,7 +208,7 @@ impl JouerTour {
         Ok(ResultatTour {
             narration,
             resume_mecanique: resume,
-            combat_termine: combat_termine(etat),
+            combat_termine: etat.combat_en_cours.as_ref().map(|c| c.termine).unwrap_or(false),
         })
     }
 }
@@ -411,6 +415,15 @@ mod tests {
         let mut de = GenerateurDeSeed::nouveau(vec![10, 4]);
         let resultat = JouerTour::executer(&mut etat, "j'observe", &mut narrateur, &mut de, &mut |_| {}).unwrap();
         assert_eq!(etat.personnage.pv_actuels, etat.personnage.pv_max - 4);
+        assert!(!resultat.combat_termine);
+    }
+
+    #[test]
+    fn jouer_tour_hors_combat_ne_signale_jamais_combat_termine() {
+        let mut etat = etat_sans_combat();
+        let mut narrateur = NarrateurDeTest { action: ActionJoueur::ActionLibre("j'observe".into()) };
+        let mut de = GenerateurDeSeed::nouveau(vec![]);
+        let resultat = JouerTour::executer(&mut etat, "j'observe", &mut narrateur, &mut de, &mut |_| {}).unwrap();
         assert!(!resultat.combat_termine);
     }
 
