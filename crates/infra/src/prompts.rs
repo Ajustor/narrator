@@ -63,15 +63,13 @@ pub fn construire_prompt_detection_pnj(narration: &str, noms_connus: &[String]) 
          PNJ déjà connus : {}\n\
          Un personnage non-joueur important est-il apparu ou a-t-il été mentionné dans ce texte ? \
          Réponds uniquement par un objet JSON, sans aucun autre texte. Utilise exactement un de ces \
-         trois formats, avec ces clés exactes :\n\
+         deux formats, avec ces clés exactes :\n\
          {{\"pnj\": null}}\n\
-         {{\"pnj\": \"Aldric\", \"nouveau\": false}}\n\
-         {{\"pnj\": \"Aldric\", \"nouveau\": true, \"description\": \"forgeron bourru et méfiant\"}}\n\
+         {{\"pnj\": \"Aldric\", \"description\": \"forgeron bourru et méfiant\"}}\n\
          Utilise le premier format si aucun PNJ important n'est apparu ou mentionné. Utilise le \
-         deuxième format si le PNJ mentionné figure déjà dans la liste des PNJ déjà connus \
-         ci-dessus. Utilise le troisième format s'il s'agit d'un PNJ qui n'est pas dans cette \
-         liste — remplace alors \"Aldric\" par son nom réel et \"forgeron bourru et méfiant\" par \
-         une description de quelques mots (personnalité, rôle).",
+         deuxième format sinon — remplace \"Aldric\" par son nom réel. Si ce PNJ figure déjà dans \
+         la liste des PNJ déjà connus ci-dessus, tu peux laisser \"description\" vide (\"\") ; \
+         sinon, donne une description de quelques mots (personnalité, rôle).",
         narration,
         if noms_connus.is_empty() { "aucun".to_string() } else { noms_connus.join(", ") },
     )
@@ -156,7 +154,13 @@ fn description_pnj_pertinents(etat: &EtatPartie, action: &ActionJoueur) -> Strin
     } else {
         let descriptions: Vec<String> = pertinents
             .iter()
-            .map(|p| format!("{} : {}", p.nom, p.description))
+            .map(|p| {
+                if p.description.is_empty() {
+                    p.nom.clone()
+                } else {
+                    format!("{} : {}", p.nom, p.description)
+                }
+            })
             .collect();
         format!("PNJ pertinents déjà rencontrés : {}\n", descriptions.join(" ; "))
     }
@@ -392,6 +396,24 @@ mod tests {
     }
 
     #[test]
+    fn le_prompt_de_narration_n_affiche_pas_de_deux_points_vide_pour_un_pnj_sans_description() {
+        let mut etat = etat_sans_combat();
+        etat.pnj_connus.push(FichePnj {
+            nom: "Aldric".to_string(),
+            description: String::new(),
+            historique: vec![],
+        });
+        let contexte = ContexteResultat {
+            etat,
+            action: ActionJoueur::ActionLibre("Je parle à Aldric".into()),
+            resume_mecanique: vec![],
+        };
+        let prompt = construire_prompt_narration(&contexte);
+        assert!(prompt.contains("Aldric"));
+        assert!(!prompt.contains("Aldric : "));
+    }
+
+    #[test]
     fn le_prompt_de_detection_pnj_contient_la_narration_et_les_noms_connus() {
         let prompt = construire_prompt_detection_pnj("Aldric te salue.", &["Aldric".to_string()]);
         assert!(prompt.contains("Aldric te salue."));
@@ -408,7 +430,6 @@ mod tests {
     fn le_prompt_de_detection_pnj_contient_un_exemple_pour_chaque_format() {
         let prompt = construire_prompt_detection_pnj("Peu importe.", &[]);
         assert!(prompt.contains(r#"{"pnj": null}"#));
-        assert!(prompt.contains(r#"{"pnj": "Aldric", "nouveau": false}"#));
-        assert!(prompt.contains(r#"{"pnj": "Aldric", "nouveau": true, "description": "forgeron bourru et méfiant"}"#));
+        assert!(prompt.contains(r#"{"pnj": "Aldric", "description": "forgeron bourru et méfiant"}"#));
     }
 }

@@ -9,6 +9,7 @@ pub struct EtatPartie {
     pub lieu_actuel: String,
     pub combat_en_cours: Option<Combat>,
     pub resumes: Vec<String>,
+    #[serde(default)]
     pub pnj_connus: Vec<FichePnj>,
 }
 

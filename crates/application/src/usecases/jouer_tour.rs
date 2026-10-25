@@ -195,6 +195,15 @@ fn condenser_si_necessaire(etat: &mut EtatPartie, narrateur: &mut dyn Narrateur)
     }
 }
 
+// Un modèle quantifié de petite taille (ex : Qwen2.5-3B en Q4_K_M) ne
+// fournit pas toujours une description dans sa réponse JSON de détection,
+// même avec les exemples explicites du prompt (`construire_prompt_detection_pnj`
+// dans `infra`, qui a d'abord corrigé le problème plus grave où le modèle
+// employait un nom commun comme "le tavernier" au lieu d'inventer un nom
+// propre). Une fiche créée sans description se complète donc elle-même dès
+// qu'une détection ultérieure en fournit une — voir la vérification
+// `description.is_empty()` ci-dessous — plutôt que de rester vide pour
+// toujours.
 fn enregistrer_pnj_si_pertinent(etat: &mut EtatPartie, narration: &str, narrateur: &mut dyn Narrateur) {
     if !combat_termine(etat) {
         return;
@@ -207,6 +216,11 @@ fn enregistrer_pnj_si_pertinent(etat: &mut EtatPartie, narration: &str, narrateu
             .iter_mut()
             .find(|p| p.nom.eq_ignore_ascii_case(&detecte.nom));
         if let Some(fiche) = fiche_existante {
+            if fiche.description.is_empty() {
+                if let Some(description) = detecte.nouvelle_description {
+                    fiche.description = description;
+                }
+            }
             fiche.historique.push(narration.to_string());
         } else {
             etat.pnj_connus.push(FichePnj {
@@ -771,6 +785,47 @@ mod tests {
             etat.pnj_connus[0].historique,
             vec!["Première rencontre à la forge.".to_string(), "Aldric le forgeron te salue.".to_string()]
         );
+    }
+
+    #[test]
+    fn jouer_tour_complete_la_description_d_une_fiche_pnj_existante_si_elle_etait_vide() {
+        let mut etat = etat_sans_combat();
+        etat.pnj_connus.push(FichePnj {
+            nom: "Aldric".to_string(),
+            description: String::new(),
+            historique: vec!["Première rencontre.".to_string()],
+        });
+        let mut narrateur = NarrateurDetectionPnj {
+            resultat: Ok(Some(PnjDetecte {
+                nom: "Aldric".to_string(),
+                nouvelle_description: Some("forgeron bourru et méfiant".to_string()),
+            })),
+        };
+        let mut de = GenerateurDeSeed::nouveau(vec![]);
+        JouerTour::executer(&mut etat, "je retourne voir Aldric", &mut narrateur, &mut de, &mut |_| {}).unwrap();
+
+        assert_eq!(etat.pnj_connus.len(), 1);
+        assert_eq!(etat.pnj_connus[0].description, "forgeron bourru et méfiant");
+    }
+
+    #[test]
+    fn jouer_tour_ne_remplace_pas_une_description_deja_presente() {
+        let mut etat = etat_sans_combat();
+        etat.pnj_connus.push(FichePnj {
+            nom: "Aldric".to_string(),
+            description: "forgeron bourru et méfiant".to_string(),
+            historique: vec!["Première rencontre.".to_string()],
+        });
+        let mut narrateur = NarrateurDetectionPnj {
+            resultat: Ok(Some(PnjDetecte {
+                nom: "Aldric".to_string(),
+                nouvelle_description: Some("autre description".to_string()),
+            })),
+        };
+        let mut de = GenerateurDeSeed::nouveau(vec![]);
+        JouerTour::executer(&mut etat, "je retourne voir Aldric", &mut narrateur, &mut de, &mut |_| {}).unwrap();
+
+        assert_eq!(etat.pnj_connus[0].description, "forgeron bourru et méfiant");
     }
 
     #[test]
