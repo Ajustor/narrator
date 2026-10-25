@@ -177,4 +177,11 @@ mod tests {
             .unwrap();
         assert!(condense.contains('2'));
     }
+
+    #[test]
+    fn la_detection_de_pnj_ne_renvoie_rien_par_defaut() {
+        let mut narrateur = FauxNarrateur;
+        let resultat = narrateur.detecter_pnj("Peu importe.", &[]).unwrap();
+        assert_eq!(resultat, None);
+    }
 }
