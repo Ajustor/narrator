@@ -87,6 +87,7 @@ mod tests {
                 lieu_actuel: "Clairière".into(),
                 combat_en_cours: combat,
                 resumes: vec![],
+                pnj_connus: vec![],
             },
             saisie_joueur: saisie.to_string(),
         }

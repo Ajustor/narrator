@@ -232,6 +232,7 @@ mod tests {
             lieu_actuel: "Clairière".into(),
             combat_en_cours: None,
             resumes: vec![],
+            pnj_connus: vec![],
         }
     }
 

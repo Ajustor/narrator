@@ -1,4 +1,5 @@
 use crate::combat::Combat;
+use crate::fiche_pnj::FichePnj;
 use crate::personnage::Personnage;
 use serde::{Deserialize, Serialize};
 
@@ -8,6 +9,7 @@ pub struct EtatPartie {
     pub lieu_actuel: String,
     pub combat_en_cours: Option<Combat>,
     pub resumes: Vec<String>,
+    pub pnj_connus: Vec<FichePnj>,
 }
 
 #[cfg(test)]
@@ -33,6 +35,11 @@ mod tests {
             lieu_actuel: "Clairière".into(),
             combat_en_cours: None,
             resumes: vec!["Le voyage commence.".into()],
+            pnj_connus: vec![FichePnj {
+                nom: "Aldric".into(),
+                description: "forgeron bourru et méfiant".into(),
+                historique: vec!["Première rencontre à la forge.".into()],
+            }],
         }
     }
 
@@ -44,5 +51,6 @@ mod tests {
         assert_eq!(relu.personnage.nom, etat.personnage.nom);
         assert_eq!(relu.lieu_actuel, etat.lieu_actuel);
         assert_eq!(relu.resumes, etat.resumes);
+        assert_eq!(relu.pnj_connus, etat.pnj_connus);
     }
 }

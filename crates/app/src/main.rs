@@ -36,6 +36,7 @@ fn main() {
                 lieu_actuel: "Clairière".to_string(),
                 combat_en_cours: Some(combat),
                 resumes: Vec::new(),
+                pnj_connus: Vec::new(),
             }
         }
         Err(ErreurSauvegarde::Lecture(message)) => {
