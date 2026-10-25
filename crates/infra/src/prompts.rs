@@ -62,10 +62,16 @@ pub fn construire_prompt_detection_pnj(narration: &str, noms_connus: &[String]) 
         "Voici ce qui vient d'être raconté : {}\n\
          PNJ déjà connus : {}\n\
          Un personnage non-joueur important est-il apparu ou a-t-il été mentionné dans ce texte ? \
-         Réponds uniquement par un objet JSON, sans aucun autre texte : \
-         {{\"pnj\": null}} si aucun, {{\"pnj\": \"Nom\", \"nouveau\": false}} si c'est un PNJ déjà \
-         connu, ou {{\"pnj\": \"Nom\", \"nouveau\": true, \"description\": \"...\"}} si c'est un \
-         nouveau PNJ (description en quelques mots : personnalité, rôle).",
+         Réponds uniquement par un objet JSON, sans aucun autre texte. Utilise exactement un de ces \
+         trois formats, avec ces clés exactes :\n\
+         {{\"pnj\": null}}\n\
+         {{\"pnj\": \"Aldric\", \"nouveau\": false}}\n\
+         {{\"pnj\": \"Aldric\", \"nouveau\": true, \"description\": \"forgeron bourru et méfiant\"}}\n\
+         Utilise le premier format si aucun PNJ important n'est apparu ou mentionné. Utilise le \
+         deuxième format si le PNJ mentionné figure déjà dans la liste des PNJ déjà connus \
+         ci-dessus. Utilise le troisième format s'il s'agit d'un PNJ qui n'est pas dans cette \
+         liste — remplace alors \"Aldric\" par son nom réel et \"forgeron bourru et méfiant\" par \
+         une description de quelques mots (personnalité, rôle).",
         narration,
         if noms_connus.is_empty() { "aucun".to_string() } else { noms_connus.join(", ") },
     )
@@ -396,5 +402,13 @@ mod tests {
     fn le_prompt_de_detection_pnj_gere_une_liste_de_noms_connus_vide() {
         let prompt = construire_prompt_detection_pnj("Rien ne se passe.", &[]);
         assert!(prompt.contains("aucun"));
+    }
+
+    #[test]
+    fn le_prompt_de_detection_pnj_contient_un_exemple_pour_chaque_format() {
+        let prompt = construire_prompt_detection_pnj("Peu importe.", &[]);
+        assert!(prompt.contains(r#"{"pnj": null}"#));
+        assert!(prompt.contains(r#"{"pnj": "Aldric", "nouveau": false}"#));
+        assert!(prompt.contains(r#"{"pnj": "Aldric", "nouveau": true, "description": "forgeron bourru et méfiant"}"#));
     }
 }
