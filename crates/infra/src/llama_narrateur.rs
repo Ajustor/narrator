@@ -1,4 +1,4 @@
-use crate::action_schema::{construire_schema_action, interpreter_json_action};
+use crate::action_schema::interpreter_json_action;
 use crate::prompts::{construire_prompt_classification, construire_prompt_narration};
 use application::ports::narrateur::{ContexteResultat, ContexteTour, ErreurNarrateur, Narrateur};
 use domain::ActionJoueur;
@@ -150,10 +150,22 @@ impl LlamaNarrateur {
 
 impl Narrateur for LlamaNarrateur {
     fn proposer_action(&mut self, contexte: &ContexteTour) -> Result<ActionJoueur, ErreurNarrateur> {
-        let schema = construire_schema_action(&contexte.etat);
+        // La génération contrainte par grammaire GBNF (`construire_schema_action`
+        // + `json_schema_to_grammar`) a été essayée puis abandonnée ici : elle
+        // déclenche de façon systématique et reproductible un crash connu et
+        // non résolu du moteur de grammaire de llama.cpp
+        // (GGML_ASSERT(!stacks.empty()) dans llama-grammar.cpp — voir par ex.
+        // ggml-org/llama.cpp#29715), confirmé indépendant du modèle (identique
+        // avec Qwen2.5-3B-Instruct et Llama-3.2-3B-Instruct). La génération
+        // reste donc libre ici ; `interpreter_json_action` et `valider_action`
+        // (dans `application`) sont les deux lignes de défense contre une
+        // sortie JSON invalide ou une cible/un objet inexistant. Le schéma
+        // JSON et sa conversion en grammaire restent testés dans ce fichier
+        // et dans `action_schema.rs`, au cas où une future version de
+        // llama-cpp-2 corrige ce bug.
         let prompt = construire_prompt_classification(contexte);
         let json_brut = self
-            .generer(&prompt, TOKENS_MAX_CLASSIFICATION, Some(&schema.to_string()), &mut |_| {})
+            .generer(&prompt, TOKENS_MAX_CLASSIFICATION, None, &mut |_| {})
             .map_err(ErreurNarrateur::EchecGeneration)?;
         let action = interpreter_json_action(&json_brut).map_err(|e| ErreurNarrateur::EchecGeneration(e.0))?;
         // Le modèle n'est jamais chargé de reformuler la saisie du joueur : le

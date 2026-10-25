@@ -1,6 +1,12 @@
 use domain::{EffetObjet, EtatPartie};
 use serde_json::Value;
 
+/// Pas appelée en production : `LlamaNarrateur::proposer_action` n'utilise
+/// plus la grammaire GBNF (crash connu et non résolu de llama.cpp, voir le
+/// commentaire dans `llama_narrateur.rs`). Conservée et testée ici — y
+/// compris sa conversion en grammaire, dans `llama_narrateur.rs` — pour une
+/// future réactivation si ce bug est corrigé côté llama.cpp.
+#[allow(dead_code)]
 pub fn construire_schema_action(etat: &EtatPartie) -> Value {
     let ennemis_vivants: Vec<Value> = etat
         .combat_en_cours
