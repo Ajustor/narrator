@@ -1,5 +1,5 @@
 use application::ports::narrateur::{ContexteResultat, ContexteTour};
-use domain::{EffetObjet, EtatPartie};
+use domain::{ActionJoueur, EffetObjet, EtatPartie, FichePnj};
 
 pub fn construire_prompt_classification(contexte: &ContexteTour) -> String {
     format!(
@@ -31,12 +31,17 @@ pub fn construire_prompt_narration(contexte: &ContexteResultat) -> String {
     };
     format!(
         "{}\
+         {}\
          Le joueur a tenté : {:?}.\n\
          Voici ce qui s'est réellement passé : {}\n\
          {}\
          Raconte cette scène de façon vivante et dramatique, en français, \
          en deux ou trois phrases, sans jamais contredire ces faits ni inventer d'autres chiffres.",
-        description_memoire(&contexte.etat), contexte.action, resultat, description_etat_apres_resolution(&contexte.etat),
+        description_memoire(&contexte.etat),
+        description_pnj_pertinents(&contexte.etat, &contexte.action),
+        contexte.action,
+        resultat,
+        description_etat_apres_resolution(&contexte.etat),
     )
 }
 
@@ -49,6 +54,20 @@ pub fn construire_prompt_condensation(anciens: &[String]) -> String {
          obtenus, ennemis vaincus) sans les détails mineurs. Réponds uniquement par ce \
          paragraphe, sans aucun autre texte.",
         anciens.join("\n"),
+    )
+}
+
+pub fn construire_prompt_detection_pnj(narration: &str, noms_connus: &[String]) -> String {
+    format!(
+        "Voici ce qui vient d'être raconté : {}\n\
+         PNJ déjà connus : {}\n\
+         Un personnage non-joueur important est-il apparu ou a-t-il été mentionné dans ce texte ? \
+         Réponds uniquement par un objet JSON, sans aucun autre texte : \
+         {{\"pnj\": null}} si aucun, {{\"pnj\": \"Nom\", \"nouveau\": false}} si c'est un PNJ déjà \
+         connu, ou {{\"pnj\": \"Nom\", \"nouveau\": true, \"description\": \"...\"}} si c'est un \
+         nouveau PNJ (description en quelques mots : personnalité, rôle).",
+        narration,
+        if noms_connus.is_empty() { "aucun".to_string() } else { noms_connus.join(", ") },
     )
 }
 
@@ -116,6 +135,27 @@ fn description_combat(etat: &EtatPartie) -> String {
     }
 }
 
+fn description_pnj_pertinents(etat: &EtatPartie, action: &ActionJoueur) -> String {
+    let ActionJoueur::ActionLibre(texte) = action else {
+        return String::new();
+    };
+    let texte_minuscule = texte.to_lowercase();
+    let pertinents: Vec<&FichePnj> = etat
+        .pnj_connus
+        .iter()
+        .filter(|p| texte_minuscule.contains(&p.nom.to_lowercase()))
+        .collect();
+    if pertinents.is_empty() {
+        String::new()
+    } else {
+        let descriptions: Vec<String> = pertinents
+            .iter()
+            .map(|p| format!("{} : {}", p.nom, p.description))
+            .collect();
+        format!("PNJ pertinents déjà rencontrés : {}\n", descriptions.join(" ; "))
+    }
+}
+
 fn description_memoire(etat: &EtatPartie) -> String {
     if etat.resumes.is_empty() {
         String::new()
@@ -127,7 +167,7 @@ fn description_memoire(etat: &EtatPartie) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use domain::{ActionJoueur, Caracteristiques, Combat, De, Ennemi, Objet, Personnage};
+    use domain::{Caracteristiques, Combat, De, Ennemi, Objet, Personnage};
 
     fn etat_sans_combat() -> EtatPartie {
         EtatPartie {
@@ -308,5 +348,53 @@ mod tests {
         };
         let prompt = construire_prompt_narration(&contexte);
         assert!(!prompt.contains("Ce qui s'est passé jusqu'ici"));
+    }
+
+    #[test]
+    fn le_prompt_de_narration_contient_la_fiche_d_un_pnj_mentionne_par_le_joueur() {
+        let mut etat = etat_sans_combat();
+        etat.pnj_connus.push(FichePnj {
+            nom: "Aldric".to_string(),
+            description: "forgeron bourru et méfiant".to_string(),
+            historique: vec![],
+        });
+        let contexte = ContexteResultat {
+            etat,
+            action: ActionJoueur::ActionLibre("Je parle à Aldric".into()),
+            resume_mecanique: vec![],
+        };
+        let prompt = construire_prompt_narration(&contexte);
+        assert!(prompt.contains("Aldric"));
+        assert!(prompt.contains("forgeron bourru et méfiant"));
+    }
+
+    #[test]
+    fn le_prompt_de_narration_ne_mentionne_pas_un_pnj_non_pertinent() {
+        let mut etat = etat_sans_combat();
+        etat.pnj_connus.push(FichePnj {
+            nom: "Aldric".to_string(),
+            description: "forgeron bourru".to_string(),
+            historique: vec![],
+        });
+        let contexte = ContexteResultat {
+            etat,
+            action: ActionJoueur::ActionLibre("Je regarde le ciel".into()),
+            resume_mecanique: vec![],
+        };
+        let prompt = construire_prompt_narration(&contexte);
+        assert!(!prompt.contains("Aldric"));
+    }
+
+    #[test]
+    fn le_prompt_de_detection_pnj_contient_la_narration_et_les_noms_connus() {
+        let prompt = construire_prompt_detection_pnj("Aldric te salue.", &["Aldric".to_string()]);
+        assert!(prompt.contains("Aldric te salue."));
+        assert!(prompt.contains("Aldric"));
+    }
+
+    #[test]
+    fn le_prompt_de_detection_pnj_gere_une_liste_de_noms_connus_vide() {
+        let prompt = construire_prompt_detection_pnj("Rien ne se passe.", &[]);
+        assert!(prompt.contains("aucun"));
     }
 }

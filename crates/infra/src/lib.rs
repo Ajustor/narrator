@@ -1,4 +1,5 @@
 mod action_schema;
+mod detection_pnj;
 mod faux_narrateur;
 mod generateur_de_os;
 mod llama_narrateur;

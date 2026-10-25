@@ -1,4 +1,4 @@
-use application::ports::narrateur::{ContexteResultat, ContexteTour, ErreurNarrateur, Narrateur};
+use application::ports::narrateur::{ContexteResultat, ContexteTour, ErreurNarrateur, Narrateur, PnjDetecte};
 use domain::{ActionJoueur, EffetObjet};
 
 pub struct FauxNarrateur;
@@ -46,6 +46,10 @@ impl Narrateur for FauxNarrateur {
 
     fn condenser_resumes(&mut self, anciens: &[String]) -> Result<String, ErreurNarrateur> {
         Ok(format!("[résumé condensé de {} tours]", anciens.len()))
+    }
+
+    fn detecter_pnj(&mut self, _narration: &str, _noms_connus: &[String]) -> Result<Option<PnjDetecte>, ErreurNarrateur> {
+        Ok(None)
     }
 }
 

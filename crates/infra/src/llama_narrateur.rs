@@ -1,6 +1,10 @@
 use crate::action_schema::interpreter_json_action;
-use crate::prompts::{construire_prompt_classification, construire_prompt_condensation, construire_prompt_narration};
-use application::ports::narrateur::{ContexteResultat, ContexteTour, ErreurNarrateur, Narrateur};
+use crate::detection_pnj::interpreter_json_detection_pnj;
+use crate::prompts::{
+    construire_prompt_classification, construire_prompt_condensation, construire_prompt_detection_pnj,
+    construire_prompt_narration,
+};
+use application::ports::narrateur::{ContexteResultat, ContexteTour, ErreurNarrateur, Narrateur, PnjDetecte};
 use domain::ActionJoueur;
 use llama_cpp_2::context::params::LlamaContextParams;
 use llama_cpp_2::llama_backend::LlamaBackend;
@@ -15,6 +19,7 @@ const TAILLE_CONTEXTE: u32 = 4096;
 const TOKENS_MAX_CLASSIFICATION: i32 = 100;
 const TOKENS_MAX_NARRATION: i32 = 200;
 const TOKENS_MAX_CONDENSATION: i32 = 150;
+const TOKENS_MAX_DETECTION_PNJ: i32 = 100;
 
 pub struct LlamaNarrateur {
     backend: LlamaBackend,
@@ -203,6 +208,14 @@ impl Narrateur for LlamaNarrateur {
         let prompt = construire_prompt_condensation(anciens);
         self.generer(&prompt, TOKENS_MAX_CONDENSATION, None, &mut |_| {})
             .map_err(ErreurNarrateur::EchecGeneration)
+    }
+
+    fn detecter_pnj(&mut self, narration: &str, noms_connus: &[String]) -> Result<Option<PnjDetecte>, ErreurNarrateur> {
+        let prompt = construire_prompt_detection_pnj(narration, noms_connus);
+        let json_brut = self
+            .generer(&prompt, TOKENS_MAX_DETECTION_PNJ, None, &mut |_| {})
+            .map_err(ErreurNarrateur::EchecGeneration)?;
+        interpreter_json_detection_pnj(&json_brut).map_err(|e| ErreurNarrateur::EchecGeneration(e.0))
     }
 }
 #[cfg(test)]
