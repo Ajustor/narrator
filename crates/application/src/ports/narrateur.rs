@@ -34,6 +34,10 @@ pub enum ErreurNarrateur {
 ///    the proposed action from whatever structured format the model
 ///    outputs (e.g. a JSON block) — that parsing is the implementation's
 ///    responsibility, not something `application` does for it.
+/// 4. `condenser_resumes` must behave as a pure text-compression step: it
+///    never inspects or mutates `EtatPartie`, and the decision of which
+///    résumés are "old enough" to send to it is entirely `application`'s
+///    responsibility, not the implementation's.
 pub trait Narrateur: Send {
     /// Proposes an action for the player's free-text input. No narration,
     /// no streaming — this result is never shown to the player directly.
@@ -50,4 +54,9 @@ pub trait Narrateur: Send {
         contexte: &ContexteResultat,
         sur_fragment: &mut dyn FnMut(&str),
     ) -> Result<String, ErreurNarrateur>;
+
+    /// Compresses older turn-résumés (oldest to newest) into a single
+    /// shorter string, replacing them. Never shown to the player, no
+    /// streaming — same as `proposer_action`.
+    fn condenser_resumes(&mut self, anciens: &[String]) -> Result<String, ErreurNarrateur>;
 }

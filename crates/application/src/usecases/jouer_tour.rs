@@ -2,6 +2,9 @@ use crate::ports::generateur_de::GenerateurDe;
 use crate::ports::narrateur::{ContexteResultat, ContexteTour, ErreurNarrateur, Narrateur};
 use domain::{resoudre_attaque, ActionJoueur, De, EffetObjet, EtatPartie, Vainqueur};
 
+pub const SEUIL_MOTS_RESUMES: usize = 800;
+pub const NB_RESUMES_RECENTS_CONSERVES: usize = 5;
+
 fn message_echec_narrateur(erreur: ErreurNarrateur) -> ErreurTour {
     let ErreurNarrateur::EchecGeneration(message) = erreur;
     ErreurTour::EchecNarrateur(message)
@@ -157,6 +160,21 @@ fn terminer_si_joueur_mort(etat: &mut EtatPartie) {
     }
 }
 
+fn condenser_si_necessaire(etat: &mut EtatPartie, narrateur: &mut dyn Narrateur) {
+    let total_mots: usize = etat.resumes.iter().map(|r| r.split_whitespace().count()).sum();
+    if total_mots <= SEUIL_MOTS_RESUMES || etat.resumes.len() <= NB_RESUMES_RECENTS_CONSERVES {
+        return;
+    }
+
+    let point_de_coupe = etat.resumes.len() - NB_RESUMES_RECENTS_CONSERVES;
+    let anciens = &etat.resumes[..point_de_coupe];
+    if let Ok(condense) = narrateur.condenser_resumes(anciens) {
+        let mut nouveaux = vec![condense];
+        nouveaux.extend_from_slice(&etat.resumes[point_de_coupe..]);
+        etat.resumes = nouveaux;
+    }
+}
+
 pub struct JouerTour;
 
 impl JouerTour {
@@ -218,6 +236,9 @@ impl JouerTour {
         let narration = narrateur
             .raconter_resultat(&contexte_resultat, sur_fragment)
             .map_err(message_echec_narrateur)?;
+
+        etat.resumes.push(narration.clone());
+        condenser_si_necessaire(etat, narrateur);
 
         Ok(ResultatTour {
             narration,
@@ -388,6 +409,10 @@ mod tests {
             sur_fragment("narration de test");
             Ok("narration de test".to_string())
         }
+
+        fn condenser_resumes(&mut self, _anciens: &[String]) -> Result<String, ErreurNarrateur> {
+            Ok("résumé condensé de test".to_string())
+        }
     }
 
     #[test]
@@ -471,6 +496,90 @@ mod tests {
             *self.contexte_resultat_recu.borrow_mut() = Some(contexte.clone());
             Ok(String::new())
         }
+
+        fn condenser_resumes(&mut self, _anciens: &[String]) -> Result<String, ErreurNarrateur> {
+            Ok(String::new())
+        }
+    }
+
+    struct NarrateurCondensateur {
+        resultat: Result<String, ErreurNarrateur>,
+        anciens_recus: RefCell<Option<Vec<String>>>,
+    }
+
+    impl Narrateur for NarrateurCondensateur {
+        fn proposer_action(&mut self, _contexte: &ContexteTour) -> Result<ActionJoueur, ErreurNarrateur> {
+            Ok(ActionJoueur::ActionLibre("j'observe".into()))
+        }
+
+        fn raconter_resultat(
+            &mut self,
+            _contexte: &ContexteResultat,
+            _sur_fragment: &mut dyn FnMut(&str),
+        ) -> Result<String, ErreurNarrateur> {
+            Ok("Il ne se passe rien de notable.".to_string())
+        }
+
+        fn condenser_resumes(&mut self, anciens: &[String]) -> Result<String, ErreurNarrateur> {
+            *self.anciens_recus.borrow_mut() = Some(anciens.to_vec());
+            match &self.resultat {
+                Ok(texte) => Ok(texte.clone()),
+                Err(ErreurNarrateur::EchecGeneration(message)) => {
+                    Err(ErreurNarrateur::EchecGeneration(message.clone()))
+                }
+            }
+        }
+    }
+
+    fn resume_de_n_mots(n: usize) -> String {
+        "mot ".repeat(n).trim_end().to_string()
+    }
+
+    #[test]
+    fn jouer_tour_ajoute_la_narration_aux_resumes() {
+        let mut etat = etat_sans_combat();
+        let mut narrateur = NarrateurDeTest { action: ActionJoueur::ActionLibre("j'observe".into()) };
+        let mut de = GenerateurDeSeed::nouveau(vec![]);
+        JouerTour::executer(&mut etat, "j'observe", &mut narrateur, &mut de, &mut |_| {}).unwrap();
+        assert_eq!(etat.resumes, vec!["narration de test".to_string()]);
+    }
+
+    #[test]
+    fn jouer_tour_condense_les_anciens_resumes_une_fois_le_seuil_depasse() {
+        let mut etat = etat_sans_combat();
+        etat.resumes = (0..9).map(|_| resume_de_n_mots(90)).collect(); // 9 * 90 = 810 mots, déjà au-dessus du seuil
+        let mut narrateur = NarrateurCondensateur {
+            resultat: Ok("résumé condensé".to_string()),
+            anciens_recus: RefCell::new(None),
+        };
+        let mut de = GenerateurDeSeed::nouveau(vec![]);
+        JouerTour::executer(&mut etat, "j'observe", &mut narrateur, &mut de, &mut |_| {}).unwrap();
+
+        // 9 anciens + 1 nouvelle narration = 10 résumés avant condensation ;
+        // les NB_RESUMES_RECENTS_CONSERVES=5 derniers sont gardés, les 5 plus anciens condensés.
+        assert_eq!(etat.resumes.len(), 1 + NB_RESUMES_RECENTS_CONSERVES);
+        assert_eq!(etat.resumes[0], "résumé condensé");
+
+        let anciens_recus = narrateur.anciens_recus.borrow();
+        assert_eq!(anciens_recus.as_ref().unwrap().len(), 5);
+    }
+
+    #[test]
+    fn jouer_tour_laisse_les_resumes_inchanges_si_la_condensation_echoue() {
+        let mut etat = etat_sans_combat();
+        etat.resumes = (0..9).map(|_| resume_de_n_mots(90)).collect();
+        let resumes_avant = etat.resumes.clone();
+        let mut narrateur = NarrateurCondensateur {
+            resultat: Err(ErreurNarrateur::EchecGeneration("échec simulé".into())),
+            anciens_recus: RefCell::new(None),
+        };
+        let mut de = GenerateurDeSeed::nouveau(vec![]);
+        let resultat = JouerTour::executer(&mut etat, "j'observe", &mut narrateur, &mut de, &mut |_| {});
+
+        assert!(resultat.is_ok());
+        let mut resumes_attendus = resumes_avant;
+        resumes_attendus.push("Il ne se passe rien de notable.".to_string());
+        assert_eq!(etat.resumes, resumes_attendus);
     }
 
     #[test]
