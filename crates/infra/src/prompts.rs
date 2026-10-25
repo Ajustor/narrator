@@ -30,12 +30,25 @@ pub fn construire_prompt_narration(contexte: &ContexteResultat) -> String {
         contexte.resume_mecanique.join(" ")
     };
     format!(
-        "Le joueur a tenté : {:?}.\n\
+        "{}\
+         Le joueur a tenté : {:?}.\n\
          Voici ce qui s'est réellement passé : {}\n\
          {}\
          Raconte cette scène de façon vivante et dramatique, en français, \
          en deux ou trois phrases, sans jamais contredire ces faits ni inventer d'autres chiffres.",
-        contexte.action, resultat, description_etat_apres_resolution(&contexte.etat),
+        description_memoire(&contexte.etat), contexte.action, resultat, description_etat_apres_resolution(&contexte.etat),
+    )
+}
+
+pub fn construire_prompt_condensation(anciens: &[String]) -> String {
+    format!(
+        "Voici plusieurs résumés successifs d'une histoire de jeu de rôle en français :\n\
+         {}\n\
+         Condense-les en un seul paragraphe court (3-4 phrases maximum) en français, \
+         qui garde les faits importants (lieux visités, événements marquants, objets \
+         obtenus, ennemis vaincus) sans les détails mineurs. Réponds uniquement par ce \
+         paragraphe, sans aucun autre texte.",
+        anciens.join("\n"),
     )
 }
 
@@ -100,6 +113,14 @@ fn description_combat(etat: &EtatPartie) -> String {
             }
         }
         _ => String::new(),
+    }
+}
+
+fn description_memoire(etat: &EtatPartie) -> String {
+    if etat.resumes.is_empty() {
+        String::new()
+    } else {
+        format!("Ce qui s'est passé jusqu'ici : {}\n", etat.resumes.join(" "))
     }
 }
 
@@ -247,5 +268,44 @@ mod tests {
         let prompt = construire_prompt_narration(&contexte);
         let gobelin = &etat.combat_en_cours.as_ref().unwrap().ennemis[0];
         assert!(prompt.contains(&format!("{} ({}/{} PV)", gobelin.nom, gobelin.pv_actuels, gobelin.pv_max)));
+    }
+
+    #[test]
+    fn le_prompt_de_condensation_contient_les_resumes_fournis() {
+        let anciens = vec!["Elowen quitte le village.".to_string(), "Elowen combat un gobelin.".to_string()];
+        let prompt = construire_prompt_condensation(&anciens);
+        assert!(prompt.contains("Elowen quitte le village."));
+        assert!(prompt.contains("Elowen combat un gobelin."));
+    }
+
+    #[test]
+    fn le_prompt_de_condensation_demande_un_resultat_court_et_en_francais() {
+        let prompt = construire_prompt_condensation(&["Un résumé.".to_string()]);
+        assert!(prompt.contains("en français"));
+        assert!(prompt.contains("court"));
+    }
+
+    #[test]
+    fn le_prompt_de_narration_contient_les_resumes_accumules() {
+        let mut etat = etat_sans_combat();
+        etat.resumes = vec!["Elowen a quitté le village.".to_string()];
+        let contexte = ContexteResultat {
+            etat,
+            action: ActionJoueur::ActionLibre("J'observe".into()),
+            resume_mecanique: vec![],
+        };
+        let prompt = construire_prompt_narration(&contexte);
+        assert!(prompt.contains("Elowen a quitté le village."));
+    }
+
+    #[test]
+    fn le_prompt_de_narration_ne_mentionne_pas_de_memoire_si_resumes_est_vide() {
+        let contexte = ContexteResultat {
+            etat: etat_sans_combat(),
+            action: ActionJoueur::ActionLibre("J'observe".into()),
+            resume_mecanique: vec![],
+        };
+        let prompt = construire_prompt_narration(&contexte);
+        assert!(!prompt.contains("Ce qui s'est passé jusqu'ici"));
     }
 }

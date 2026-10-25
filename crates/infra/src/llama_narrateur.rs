@@ -1,5 +1,5 @@
 use crate::action_schema::interpreter_json_action;
-use crate::prompts::{construire_prompt_classification, construire_prompt_narration};
+use crate::prompts::{construire_prompt_classification, construire_prompt_condensation, construire_prompt_narration};
 use application::ports::narrateur::{ContexteResultat, ContexteTour, ErreurNarrateur, Narrateur};
 use domain::ActionJoueur;
 use llama_cpp_2::context::params::LlamaContextParams;
@@ -14,6 +14,7 @@ use std::path::Path;
 const TAILLE_CONTEXTE: u32 = 4096;
 const TOKENS_MAX_CLASSIFICATION: i32 = 100;
 const TOKENS_MAX_NARRATION: i32 = 200;
+const TOKENS_MAX_CONDENSATION: i32 = 150;
 
 pub struct LlamaNarrateur {
     backend: LlamaBackend,
@@ -186,6 +187,12 @@ impl Narrateur for LlamaNarrateur {
     ) -> Result<String, ErreurNarrateur> {
         let prompt = construire_prompt_narration(contexte);
         self.generer(&prompt, TOKENS_MAX_NARRATION, None, sur_fragment)
+            .map_err(ErreurNarrateur::EchecGeneration)
+    }
+
+    fn condenser_resumes(&mut self, anciens: &[String]) -> Result<String, ErreurNarrateur> {
+        let prompt = construire_prompt_condensation(anciens);
+        self.generer(&prompt, TOKENS_MAX_CONDENSATION, None, &mut |_| {})
             .map_err(ErreurNarrateur::EchecGeneration)
     }
 }

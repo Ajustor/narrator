@@ -43,6 +43,10 @@ impl Narrateur for FauxNarrateur {
         }
         Ok(narration)
     }
+
+    fn condenser_resumes(&mut self, anciens: &[String]) -> Result<String, ErreurNarrateur> {
+        Ok(format!("[résumé condensé de {} tours]", anciens.len()))
+    }
 }
 
 fn trouver_premier_ennemi_vivant(contexte: &ContexteTour) -> Option<String> {
@@ -158,5 +162,14 @@ mod tests {
         let mut narrateur = FauxNarrateur;
         let narration = narrateur.raconter_resultat(&ctx_resultat, &mut |_| {}).unwrap();
         assert!(narration.contains("touché"));
+    }
+
+    #[test]
+    fn la_condensation_resume_le_nombre_de_tours_fournis() {
+        let mut narrateur = FauxNarrateur;
+        let condense = narrateur
+            .condenser_resumes(&["Tour 1.".to_string(), "Tour 2.".to_string()])
+            .unwrap();
+        assert!(condense.contains('2'));
     }
 }
