@@ -8,7 +8,14 @@ pub fn construire_prompt_classification(contexte: &ContexteTour) -> String {
          {}\
          {}\
          Le joueur dit : \"{}\"\n\
-         Réponds uniquement par un objet JSON décrivant l'action correspondante, sans aucun autre texte.",
+         Réponds uniquement par un objet JSON décrivant l'action correspondante, \
+         sans aucun autre texte. Utilise exactement un de ces quatre formats, \
+         avec ces clés exactes (remplace seulement la valeur après les deux-points \
+         pour \"cible\"/\"objet\") :\n\
+         {{\"action\": \"attaquer\", \"cible\": \"NomDeLEnnemi\"}}\n\
+         {{\"action\": \"utiliser_objet\", \"objet\": \"NomDeLObjet\"}}\n\
+         {{\"action\": \"fuir\"}}\n\
+         {{\"action\": \"libre\"}}",
         contexte.etat.lieu_actuel,
         description_combat(&contexte.etat),
         description_personnage(&contexte.etat),
@@ -189,6 +196,19 @@ mod tests {
         let prompt = construire_prompt_classification(&contexte);
         let pv = contexte.etat.personnage.pv_actuels;
         assert!(prompt.contains(&format!("{}/{}", pv, contexte.etat.personnage.pv_max)));
+    }
+
+    #[test]
+    fn le_prompt_de_classification_contient_un_exemple_pour_chaque_format_d_action() {
+        let contexte = ContexteTour {
+            etat: etat_sans_combat(),
+            saisie_joueur: "J'observe".to_string(),
+        };
+        let prompt = construire_prompt_classification(&contexte);
+        assert!(prompt.contains(r#"{"action": "attaquer", "cible": "NomDeLEnnemi"}"#));
+        assert!(prompt.contains(r#"{"action": "utiliser_objet", "objet": "NomDeLObjet"}"#));
+        assert!(prompt.contains(r#"{"action": "fuir"}"#));
+        assert!(prompt.contains(r#"{"action": "libre"}"#));
     }
 
     #[test]
