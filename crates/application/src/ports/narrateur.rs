@@ -13,6 +13,12 @@ pub struct ContexteResultat {
     pub resume_mecanique: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct PnjDetecte {
+    pub nom: String,
+    pub nouvelle_description: Option<String>,
+}
+
 #[derive(Debug)]
 pub enum ErreurNarrateur {
     EchecGeneration(String),
@@ -38,6 +44,11 @@ pub enum ErreurNarrateur {
 ///    never inspects or mutates `EtatPartie`, and the decision of which
 ///    résumés are "old enough" to send to it is entirely `application`'s
 ///    responsibility, not the implementation's.
+/// 5. `detecter_pnj` must behave as a pure detection/extraction step over
+///    the narration text it's given: it never inspects or mutates
+///    `EtatPartie` directly, and the decision of whether a PNJ is already
+///    known (by matching `noms_connus`) versus new is `application`'s to
+///    act on, not the implementation's to enforce.
 pub trait Narrateur: Send {
     /// Proposes an action for the player's free-text input. No narration,
     /// no streaming — this result is never shown to the player directly.
@@ -59,4 +70,14 @@ pub trait Narrateur: Send {
     /// shorter string, replacing them. Never shown to the player, no
     /// streaming — same as `proposer_action`.
     fn condenser_resumes(&mut self, anciens: &[String]) -> Result<String, ErreurNarrateur>;
+
+    /// Detects whether a PNJ (new or already known) appeared in the
+    /// narration text just produced. `noms_connus` lets the model match a
+    /// returning PNJ instead of inventing a duplicate. Never shown to the
+    /// player, no streaming.
+    fn detecter_pnj(
+        &mut self,
+        narration: &str,
+        noms_connus: &[String],
+    ) -> Result<Option<PnjDetecte>, ErreurNarrateur>;
 }

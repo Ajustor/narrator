@@ -1,6 +1,6 @@
 use crate::ports::generateur_de::GenerateurDe;
 use crate::ports::narrateur::{ContexteResultat, ContexteTour, ErreurNarrateur, Narrateur};
-use domain::{resoudre_attaque, ActionJoueur, De, EffetObjet, EtatPartie, Vainqueur};
+use domain::{resoudre_attaque, ActionJoueur, De, EffetObjet, EtatPartie, FichePnj, Vainqueur};
 
 // SEUIL_MOTS_RESUMES est choisi pour rester largement sous TAILLE_CONTEXTE
 // (4096 tokens, dans infra::llama_narrateur) une fois converti en tokens —
@@ -195,6 +195,29 @@ fn condenser_si_necessaire(etat: &mut EtatPartie, narrateur: &mut dyn Narrateur)
     }
 }
 
+fn enregistrer_pnj_si_pertinent(etat: &mut EtatPartie, narration: &str, narrateur: &mut dyn Narrateur) {
+    if !combat_termine(etat) {
+        return;
+    }
+
+    let noms_connus: Vec<String> = etat.pnj_connus.iter().map(|p| p.nom.clone()).collect();
+    if let Ok(Some(detecte)) = narrateur.detecter_pnj(narration, &noms_connus) {
+        let fiche_existante = etat
+            .pnj_connus
+            .iter_mut()
+            .find(|p| p.nom.eq_ignore_ascii_case(&detecte.nom));
+        if let Some(fiche) = fiche_existante {
+            fiche.historique.push(narration.to_string());
+        } else {
+            etat.pnj_connus.push(FichePnj {
+                nom: detecte.nom,
+                description: detecte.nouvelle_description.unwrap_or_default(),
+                historique: vec![narration.to_string()],
+            });
+        }
+    }
+}
+
 pub struct JouerTour;
 
 impl JouerTour {
@@ -259,6 +282,7 @@ impl JouerTour {
 
         etat.resumes.push(narration.clone());
         condenser_si_necessaire(etat, narrateur);
+        enregistrer_pnj_si_pertinent(etat, &narration, narrateur);
 
         Ok(ResultatTour {
             narration,
@@ -411,7 +435,7 @@ mod tests {
         assert!(resume.is_empty());
     }
 
-    use crate::ports::narrateur::{ContexteResultat, ContexteTour, ErreurNarrateur, Narrateur};
+    use crate::ports::narrateur::{ContexteResultat, ContexteTour, ErreurNarrateur, Narrateur, PnjDetecte};
 
     struct NarrateurDeTest {
         action: ActionJoueur,
@@ -433,6 +457,10 @@ mod tests {
 
         fn condenser_resumes(&mut self, _anciens: &[String]) -> Result<String, ErreurNarrateur> {
             Ok("résumé condensé de test".to_string())
+        }
+
+        fn detecter_pnj(&mut self, _narration: &str, _noms_connus: &[String]) -> Result<Option<PnjDetecte>, ErreurNarrateur> {
+            Ok(None)
         }
     }
 
@@ -521,6 +549,10 @@ mod tests {
         fn condenser_resumes(&mut self, _anciens: &[String]) -> Result<String, ErreurNarrateur> {
             Ok(String::new())
         }
+
+        fn detecter_pnj(&mut self, _narration: &str, _noms_connus: &[String]) -> Result<Option<PnjDetecte>, ErreurNarrateur> {
+            Ok(None)
+        }
     }
 
     struct NarrateurCondensateur {
@@ -545,6 +577,41 @@ mod tests {
             *self.anciens_recus.borrow_mut() = Some(anciens.to_vec());
             match &self.resultat {
                 Ok(texte) => Ok(texte.clone()),
+                Err(ErreurNarrateur::EchecGeneration(message)) => {
+                    Err(ErreurNarrateur::EchecGeneration(message.clone()))
+                }
+            }
+        }
+
+        fn detecter_pnj(&mut self, _narration: &str, _noms_connus: &[String]) -> Result<Option<PnjDetecte>, ErreurNarrateur> {
+            Ok(None)
+        }
+    }
+
+    struct NarrateurDetectionPnj {
+        resultat: Result<Option<PnjDetecte>, ErreurNarrateur>,
+    }
+
+    impl Narrateur for NarrateurDetectionPnj {
+        fn proposer_action(&mut self, _contexte: &ContexteTour) -> Result<ActionJoueur, ErreurNarrateur> {
+            Ok(ActionJoueur::ActionLibre("j'observe".into()))
+        }
+
+        fn raconter_resultat(
+            &mut self,
+            _contexte: &ContexteResultat,
+            _sur_fragment: &mut dyn FnMut(&str),
+        ) -> Result<String, ErreurNarrateur> {
+            Ok("Aldric le forgeron te salue.".to_string())
+        }
+
+        fn condenser_resumes(&mut self, _anciens: &[String]) -> Result<String, ErreurNarrateur> {
+            Ok(String::new())
+        }
+
+        fn detecter_pnj(&mut self, _narration: &str, _noms_connus: &[String]) -> Result<Option<PnjDetecte>, ErreurNarrateur> {
+            match &self.resultat {
+                Ok(valeur) => Ok(valeur.clone()),
                 Err(ErreurNarrateur::EchecGeneration(message)) => {
                     Err(ErreurNarrateur::EchecGeneration(message.clone()))
                 }
@@ -664,5 +731,75 @@ mod tests {
         let contexte_recu = contexte_recu.as_ref().expect("raconter_resultat aurait dû être appelé");
         assert!(contexte_recu.resume_mecanique.iter().any(|l| l.contains("touché")));
         assert_eq!(contexte_recu.action, ActionJoueur::Attaquer { cible: "Gobelin".into() });
+    }
+
+    #[test]
+    fn jouer_tour_cree_une_fiche_pnj_pour_un_nouveau_pnj_detecte() {
+        let mut etat = etat_sans_combat();
+        let mut narrateur = NarrateurDetectionPnj {
+            resultat: Ok(Some(PnjDetecte {
+                nom: "Aldric".to_string(),
+                nouvelle_description: Some("forgeron bourru et méfiant".to_string()),
+            })),
+        };
+        let mut de = GenerateurDeSeed::nouveau(vec![]);
+        JouerTour::executer(&mut etat, "je parle au forgeron", &mut narrateur, &mut de, &mut |_| {}).unwrap();
+
+        assert_eq!(etat.pnj_connus.len(), 1);
+        assert_eq!(etat.pnj_connus[0].nom, "Aldric");
+        assert_eq!(etat.pnj_connus[0].description, "forgeron bourru et méfiant");
+        assert_eq!(etat.pnj_connus[0].historique, vec!["Aldric le forgeron te salue.".to_string()]);
+    }
+
+    #[test]
+    fn jouer_tour_ajoute_a_l_historique_d_une_fiche_pnj_existante() {
+        let mut etat = etat_sans_combat();
+        etat.pnj_connus.push(FichePnj {
+            nom: "Aldric".to_string(),
+            description: "forgeron bourru et méfiant".to_string(),
+            historique: vec!["Première rencontre à la forge.".to_string()],
+        });
+        let mut narrateur = NarrateurDetectionPnj {
+            resultat: Ok(Some(PnjDetecte { nom: "Aldric".to_string(), nouvelle_description: None })),
+        };
+        let mut de = GenerateurDeSeed::nouveau(vec![]);
+        JouerTour::executer(&mut etat, "je retourne voir Aldric", &mut narrateur, &mut de, &mut |_| {}).unwrap();
+
+        assert_eq!(etat.pnj_connus.len(), 1);
+        assert_eq!(etat.pnj_connus[0].description, "forgeron bourru et méfiant");
+        assert_eq!(
+            etat.pnj_connus[0].historique,
+            vec!["Première rencontre à la forge.".to_string(), "Aldric le forgeron te salue.".to_string()]
+        );
+    }
+
+    #[test]
+    fn jouer_tour_ne_detecte_pas_de_pnj_pendant_un_combat_actif() {
+        let mut etat = etat_en_combat();
+        let mut narrateur = NarrateurDetectionPnj {
+            resultat: Ok(Some(PnjDetecte {
+                nom: "Aldric".to_string(),
+                nouvelle_description: Some("forgeron bourru".to_string()),
+            })),
+        };
+        // attaque: d20=10 + mod_dex(14)=2 => 12 >= defense 12 (touché) ; dégâts d4=3
+        // le gobelin (7 pv) survit, il agit ensuite : d20=1 + bonus_attaque 3 = 4 < défense 12 (manqué)
+        let mut de = GenerateurDeSeed::nouveau(vec![10, 3, 1, 1]);
+        JouerTour::executer(&mut etat, "j'attaque le gobelin", &mut narrateur, &mut de, &mut |_| {}).unwrap();
+
+        assert!(etat.pnj_connus.is_empty());
+    }
+
+    #[test]
+    fn jouer_tour_laisse_pnj_connus_inchange_si_la_detection_echoue() {
+        let mut etat = etat_sans_combat();
+        let mut narrateur = NarrateurDetectionPnj {
+            resultat: Err(ErreurNarrateur::EchecGeneration("échec simulé".into())),
+        };
+        let mut de = GenerateurDeSeed::nouveau(vec![]);
+        let resultat = JouerTour::executer(&mut etat, "j'observe", &mut narrateur, &mut de, &mut |_| {});
+
+        assert!(resultat.is_ok());
+        assert!(etat.pnj_connus.is_empty());
     }
 }
