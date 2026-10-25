@@ -37,6 +37,7 @@ impl LlamaNarrateur {
             .unwrap_or(4);
         let ctx_params = LlamaContextParams::default()
             .with_n_ctx(Some(NonZeroU32::new(TAILLE_CONTEXTE).unwrap()))
+            .with_n_batch(TAILLE_CONTEXTE)
             .with_n_threads(threads)
             .with_n_threads_batch(threads);
 
@@ -81,7 +82,15 @@ impl LlamaNarrateur {
             .map_err(|e| format!("échec d'application du template de discussion : {e}"))?;
 
         let tokens_prompt = self.model.vocab().tokenize(prompt_formate.as_bytes(), true, true);
-        let mut batch = LlamaBatch::new(512, 1);
+        if tokens_prompt.len() + max_tokens as usize > TAILLE_CONTEXTE as usize {
+            return Err(format!(
+                "prompt + génération ({} + {} tokens) dépasse la taille de contexte ({} tokens)",
+                tokens_prompt.len(),
+                max_tokens,
+                TAILLE_CONTEXTE
+            ));
+        }
+        let mut batch = LlamaBatch::new(tokens_prompt.len().max(1), 1);
         let dernier = (tokens_prompt.len() - 1) as i32;
         for (i, token) in (0_i32..).zip(tokens_prompt.into_iter()) {
             batch

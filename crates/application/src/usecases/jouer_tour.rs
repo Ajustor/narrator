@@ -2,8 +2,12 @@ use crate::ports::generateur_de::GenerateurDe;
 use crate::ports::narrateur::{ContexteResultat, ContexteTour, ErreurNarrateur, Narrateur};
 use domain::{resoudre_attaque, ActionJoueur, De, EffetObjet, EtatPartie, Vainqueur};
 
+// SEUIL_MOTS_RESUMES est choisi pour rester largement sous TAILLE_CONTEXTE
+// (4096 tokens, dans infra::llama_narrateur) une fois converti en tokens —
+// si l'un de ces deux nombres change, vérifier que l'autre le permet encore.
 pub const SEUIL_MOTS_RESUMES: usize = 800;
 pub const NB_RESUMES_RECENTS_CONSERVES: usize = 5;
+const LIMITE_DURE_RESUMES: usize = 4 * NB_RESUMES_RECENTS_CONSERVES;
 
 fn message_echec_narrateur(erreur: ErreurNarrateur) -> ErreurTour {
     let ErreurNarrateur::EchecGeneration(message) = erreur;
@@ -160,6 +164,10 @@ fn terminer_si_joueur_mort(etat: &mut EtatPartie) {
     }
 }
 
+// Note : le résumé condensé revient en tête de liste et sera donc lui-même
+// inclus dans `anciens` lors d'un futur cycle de condensation — l'histoire
+// la plus ancienne est donc recondensée de façon cumulative (perte
+// d'information progressive), ce qui est acceptable pour une partie solo.
 fn condenser_si_necessaire(etat: &mut EtatPartie, narrateur: &mut dyn Narrateur) {
     let total_mots: usize = etat.resumes.iter().map(|r| r.split_whitespace().count()).sum();
     if total_mots <= SEUIL_MOTS_RESUMES || etat.resumes.len() <= NB_RESUMES_RECENTS_CONSERVES {
@@ -169,9 +177,21 @@ fn condenser_si_necessaire(etat: &mut EtatPartie, narrateur: &mut dyn Narrateur)
     let point_de_coupe = etat.resumes.len() - NB_RESUMES_RECENTS_CONSERVES;
     let anciens = &etat.resumes[..point_de_coupe];
     if let Ok(condense) = narrateur.condenser_resumes(anciens) {
-        let mut nouveaux = vec![condense];
-        nouveaux.extend_from_slice(&etat.resumes[point_de_coupe..]);
-        etat.resumes = nouveaux;
+        if !condense.trim().is_empty() {
+            let mut nouveaux = vec![condense];
+            nouveaux.extend_from_slice(&etat.resumes[point_de_coupe..]);
+            etat.resumes = nouveaux;
+            return;
+        }
+    }
+
+    // La condensation a échoué, ou a renvoyé un résultat vide : si les
+    // résumés ont malgré tout fini par dépasser une limite dure (échecs
+    // répétés), on tronque directement, sans IA, pour borner la taille de
+    // la sauvegarde plutôt que de la laisser grossir indéfiniment.
+    if etat.resumes.len() > LIMITE_DURE_RESUMES {
+        let point_de_coupe_dur = etat.resumes.len() - NB_RESUMES_RECENTS_CONSERVES;
+        etat.resumes.drain(..point_de_coupe_dur);
     }
 }
 
@@ -579,6 +599,51 @@ mod tests {
         assert!(resultat.is_ok());
         let mut resumes_attendus = resumes_avant;
         resumes_attendus.push("Il ne se passe rien de notable.".to_string());
+        assert_eq!(etat.resumes, resumes_attendus);
+    }
+
+    #[test]
+    fn jouer_tour_rejette_un_resultat_de_condensation_vide() {
+        let mut etat = etat_sans_combat();
+        etat.resumes = (0..9).map(|_| resume_de_n_mots(90)).collect();
+        let resumes_avant = etat.resumes.clone();
+        let mut narrateur = NarrateurCondensateur {
+            resultat: Ok("   ".to_string()),
+            anciens_recus: RefCell::new(None),
+        };
+        let mut de = GenerateurDeSeed::nouveau(vec![]);
+        JouerTour::executer(&mut etat, "j'observe", &mut narrateur, &mut de, &mut |_| {}).unwrap();
+
+        let mut resumes_attendus = resumes_avant;
+        resumes_attendus.push("Il ne se passe rien de notable.".to_string());
+        assert_eq!(etat.resumes, resumes_attendus);
+    }
+
+    #[test]
+    fn jouer_tour_tronque_sans_ia_si_la_condensation_echoue_au_dela_de_la_limite_dure() {
+        let mut etat = etat_sans_combat();
+        etat.resumes = (0..LIMITE_DURE_RESUMES).map(|_| resume_de_n_mots(90)).collect();
+        let mut narrateur = NarrateurCondensateur {
+            resultat: Err(ErreurNarrateur::EchecGeneration("échec simulé".into())),
+            anciens_recus: RefCell::new(None),
+        };
+        let mut de = GenerateurDeSeed::nouveau(vec![]);
+        JouerTour::executer(&mut etat, "j'observe", &mut narrateur, &mut de, &mut |_| {}).unwrap();
+
+        assert_eq!(etat.resumes.len(), NB_RESUMES_RECENTS_CONSERVES);
+    }
+
+    #[test]
+    fn jouer_tour_ne_condense_pas_si_sous_le_seuil_de_mots_malgre_plus_de_cinq_resumes() {
+        let mut etat = etat_sans_combat();
+        etat.resumes = (0..NB_RESUMES_RECENTS_CONSERVES + 2).map(|_| resume_de_n_mots(10)).collect();
+        let resumes_avant = etat.resumes.clone();
+        let mut narrateur = NarrateurDeTest { action: ActionJoueur::ActionLibre("j'observe".into()) };
+        let mut de = GenerateurDeSeed::nouveau(vec![]);
+        JouerTour::executer(&mut etat, "j'observe", &mut narrateur, &mut de, &mut |_| {}).unwrap();
+
+        let mut resumes_attendus = resumes_avant;
+        resumes_attendus.push("narration de test".to_string());
         assert_eq!(etat.resumes, resumes_attendus);
     }
 
