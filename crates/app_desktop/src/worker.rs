@@ -55,8 +55,13 @@ pub fn chemin_modele_par_defaut() -> std::path::PathBuf {
         .expect("appel de File.getAbsolutePath()")
         .l()
         .expect("getAbsolutePath() retourne une java.lang.String");
+    // `JString::from(chemin_jstring)` crée une valeur temporaire ; la lier
+    // avant d'appeler `get_string` (plutôt que de l'emboîter dans l'appel)
+    // évite que le compilateur la libère avant que `chemin_java_str`
+    // (qui l'emprunte via `JavaStr`) ne soit utilisée.
+    let chemin_jstring = jni::objects::JString::from(chemin_jstring);
     let chemin_java_str = env
-        .get_string(&jni::objects::JString::from(chemin_jstring))
+        .get_string(&chemin_jstring)
         .expect("conversion JString -> JavaStr");
     let repertoire = std::path::PathBuf::from(chemin_java_str.to_str().expect("UTF-8 valide"));
     repertoire.join("Qwen2.5-3B-Instruct-Q4_K_M.gguf")

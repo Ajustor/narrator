@@ -78,7 +78,15 @@ fn main() {
     TX_INITIAL.with(|cell| *cell.borrow_mut() = Some(tx_vers_worker));
     RX_PARTAGE_INITIAL.with(|cell| *cell.borrow_mut() = Some(rx_partage));
 
-    dioxus::LaunchBuilder::desktop().launch(App);
+    // `LaunchBuilder::desktop()` n'existe que lorsque la feature `desktop`
+    // de la dépendance `dioxus` est activée (via `plateforme-desktop`) ; en
+    // build Android (`plateforme-android`, qui active `dioxus/mobile` et
+    // non `dioxus/desktop`), cette fonction associée n'existe pas du tout.
+    // `LaunchBuilder::new()` sélectionne automatiquement la bonne
+    // plateforme à partir des features cargo activées sur `dioxus`
+    // (desktop vs mobile), donc ce même appel fonctionne sur les deux
+    // plateformes sans `#[cfg(...)]` ici.
+    dioxus::LaunchBuilder::new().launch(App);
 }
 
 #[component]

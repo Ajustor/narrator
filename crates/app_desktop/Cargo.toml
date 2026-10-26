@@ -7,6 +7,14 @@ edition = "2021"
 default = ["plateforme-desktop"]
 plateforme-desktop = ["dioxus/desktop"]
 plateforme-android = ["dioxus/mobile", "dep:ndk-context", "dep:jni"]
+# `dioxus/document` est déjà activé inconditionnellement ci-dessous (la
+# fonctionnalité `document::eval`/`document::Style` est utilisée sur
+# toutes les plateformes). Cette feature ne fait qu'exposer un nom au
+# niveau du crate `app_desktop` lui-même, pour que les commandes de build
+# Android (`cargo ndk ... --features plateforme-android,document`,
+# `dx build ... --features plateforme-android,document`) restent valides
+# telles qu'elles sont documentées, sans rien changer au comportement.
+document = ["dioxus/document"]
 
 [dependencies]
 domain = { path = "../domain" }
