@@ -1,5 +1,6 @@
 #[allow(dead_code)]
 mod protocole;
+mod worker;
 
 use dioxus::prelude::*;
 
