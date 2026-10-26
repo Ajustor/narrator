@@ -42,9 +42,10 @@ pub fn Creation(sur_creation: EventHandler<MessageVersWorker>) -> Element {
             div {
                 label { "Classe : " }
                 select {
+                    value: "{classe}",
                     onchange: move |evt| classe.set(evt.value()),
                     for c in CLASSES_VALIDES.iter() {
-                        option { value: "{c}", "{c}" }
+                        option { key: "{c}", value: "{c}", "{c}" }
                     }
                 }
             }
@@ -52,6 +53,7 @@ pub fn Creation(sur_creation: EventHandler<MessageVersWorker>) -> Element {
                 div {
                     label { "{label} : " }
                     select {
+                        value: "{valeurs()[index]}",
                         onchange: move |evt| {
                             let mut v = valeurs();
                             v[index] = evt.value().parse().unwrap_or(0);
@@ -59,7 +61,7 @@ pub fn Creation(sur_creation: EventHandler<MessageVersWorker>) -> Element {
                         },
                         option { value: "0", "—" }
                         for valeur in valeurs_disponibles(index) {
-                            option { value: "{valeur}", "{valeur}" }
+                            option { key: "{valeur}", value: "{valeur}", "{valeur}" }
                         }
                     }
                 }
