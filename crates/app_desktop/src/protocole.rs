@@ -5,6 +5,7 @@ pub enum MessageVersWorker {
     CreerPersonnage { nom: String, classe: String, valeurs: [u32; 6] },
     JouerTour(String),
     NouvellePartie,
+    ConfirmerTelechargement(bool),
 }
 
 #[derive(Debug, Clone)]
@@ -16,6 +17,7 @@ pub enum MessageVersUi {
     TourEchoue(String),
     PartieReinitialisee,
     ProgressionTelechargement(f32),
+    ConfirmationTelechargementRequise(u64),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -25,4 +27,5 @@ pub enum Vue {
     FinDePartie(Option<Vainqueur>),
     ErreurChargement(String),
     Telechargement(f32),
+    ConfirmationTelechargement(u64),
 }

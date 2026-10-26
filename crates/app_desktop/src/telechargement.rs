@@ -4,7 +4,7 @@ use std::path::Path;
 pub const MODELE_URL: &str =
     "https://huggingface.co/bartowski/Qwen2.5-3B-Instruct-GGUF/resolve/main/Qwen2.5-3B-Instruct-Q4_K_M.gguf";
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum ErreurTelechargement {
     Reseau(String),
     Ecriture(String),
@@ -46,6 +46,44 @@ pub fn telecharger_modele(
     sur_progression: &mut dyn FnMut(f32),
 ) -> Result<(), ErreurTelechargement> {
     telecharger_depuis(MODELE_URL, chemin_destination, sur_progression)
+}
+
+/// Récupère la taille totale du modèle (en octets) sans le télécharger —
+/// utilisé pour demander confirmation à l'utilisateur avant de lancer un
+/// téléchargement de l'ordre du gigaoctet. Une requête `Range` ne portant
+/// que sur le premier kilo-octet déclenche une réponse `206 Partial
+/// Content` dont l'en-tête `Content-Range: bytes 0-1023/<total>` donne la
+/// taille réelle, sans transférer le fichier complet.
+pub fn verifier_taille_modele() -> Result<u64, ErreurTelechargement> {
+    verifier_taille_depuis(MODELE_URL)
+}
+
+fn verifier_taille_depuis(url: &str) -> Result<u64, ErreurTelechargement> {
+    let agent = ureq::AgentBuilder::new()
+        .timeout_connect(DELAI_RESEAU)
+        .timeout_read(DELAI_RESEAU)
+        .build();
+    let reponse = agent
+        .get(url)
+        .set("Range", "bytes=0-1023")
+        .call()
+        .map_err(|e| ErreurTelechargement::Reseau(e.to_string()))?;
+
+    let content_range = reponse.header("Content-Range").ok_or_else(|| {
+        ErreurTelechargement::Reseau("en-tête Content-Range absent de la réponse".to_string())
+    })?;
+
+    content_range
+        .rsplit('/')
+        .next()
+        .and_then(|s| s.parse::<u64>().ok())
+        .ok_or_else(|| ErreurTelechargement::Reseau(format!("Content-Range inattendu : {content_range}")))
+}
+
+/// Formate une taille en octets en gigaoctets lisibles, avec une décimale
+/// et la virgule française (ex. `1929903264` → `"1,8 Go"`).
+pub fn formater_taille_go(octets: u64) -> String {
+    format!("{:.1} Go", octets as f64 / 1_000_000_000.0).replace('.', ",")
 }
 
 /// Corps réel de `telecharger_modele`, paramétré par l'URL source. Séparé
@@ -263,6 +301,48 @@ mod tests {
             "le .tmp partiel doit être supprimé sur le chemin d'erreur"
         );
         assert!(!chemin.exists(), "aucun fichier final ne doit apparaître");
+    }
+
+    /// Serveur HTTP minimal répondant `206 Partial Content` avec un
+    /// `Content-Range` annonçant `taille_totale`, quel que soit le `Range`
+    /// demandé — suffisant pour tester `verifier_taille_depuis` sans
+    /// dépendre d'un vrai serveur distant.
+    fn servir_taille_une_fois(taille_totale: u64) -> (String, std::thread::JoinHandle<()>) {
+        let ecouteur =
+            std::net::TcpListener::bind("127.0.0.1:0").expect("écoute sur un port libre");
+        let adresse = ecouteur.local_addr().expect("adresse locale");
+        let fil = std::thread::spawn(move || {
+            let (mut flux, _) = ecouteur.accept().expect("connexion entrante");
+            let mut octet = [0u8; 1];
+            let mut fin = Vec::new();
+            while flux.read_exact(&mut octet).is_ok() {
+                fin.push(octet[0]);
+                if fin.ends_with(b"\r\n\r\n") {
+                    break;
+                }
+            }
+            let reponse = format!(
+                "HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-1023/{taille_totale}\r\nContent-Length: 1024\r\nConnection: close\r\n\r\n"
+            );
+            let _ = flux.write_all(reponse.as_bytes());
+            let _ = flux.write_all(&vec![0u8; 1024]);
+            let _ = flux.flush();
+        });
+        (format!("http://{adresse}/modele.gguf"), fil)
+    }
+
+    #[test]
+    fn verifier_taille_lit_le_content_range() {
+        let (url, fil) = servir_taille_une_fois(1_929_903_264);
+        let resultat = verifier_taille_depuis(&url);
+        fil.join().expect("fil serveur");
+        assert_eq!(resultat, Ok(1_929_903_264));
+    }
+
+    #[test]
+    fn formater_taille_go_utilise_la_virgule_francaise() {
+        assert_eq!(formater_taille_go(1_929_903_264), "1,9 Go");
+        assert_eq!(formater_taille_go(2_000_000_000), "2,0 Go");
     }
 
     #[test]

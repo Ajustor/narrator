@@ -19,6 +19,7 @@ mod worker;
 use dioxus::prelude::*;
 use futures_util::StreamExt;
 use protocole::{MessageVersUi, MessageVersWorker, Vue};
+use vues::confirmation_telechargement::ConfirmationTelechargement;
 use vues::creation::Creation;
 use vues::erreur_chargement::ErreurChargement;
 use vues::fin_de_partie::FinDePartie;
@@ -173,6 +174,9 @@ fn App() -> Element {
                 MessageVersUi::ProgressionTelechargement(progression) => {
                     vue.set(Vue::Telechargement(progression));
                 }
+                MessageVersUi::ConfirmationTelechargementRequise(taille_octets) => {
+                    vue.set(Vue::ConfirmationTelechargement(taille_octets));
+                }
                 MessageVersUi::PartieReinitialisee => {
                     etat.set(None);
                     journal.set(Vec::new());
@@ -215,6 +219,12 @@ fn App() -> Element {
             }
         }
         Vue::Telechargement(progression) => rsx! { Telechargement { progression } },
+        Vue::ConfirmationTelechargement(taille_octets) => rsx! {
+            ConfirmationTelechargement {
+                taille_octets,
+                sur_reponse: move |msg| { let _ = tx.send(msg); }
+            }
+        },
         Vue::FinDePartie(vainqueur) => rsx! {
             FinDePartie {
                 vainqueur,

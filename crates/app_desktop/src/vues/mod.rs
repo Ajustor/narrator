@@ -1,3 +1,4 @@
+pub mod confirmation_telechargement;
 pub mod creation;
 pub mod erreur_chargement;
 pub mod fin_de_partie;

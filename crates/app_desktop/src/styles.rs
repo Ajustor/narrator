@@ -100,6 +100,27 @@ html, body {
     cursor: not-allowed;
 }
 
+.bouton-secondaire {
+    background: transparent;
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.6rem 1.2rem;
+    font-size: 1rem;
+    cursor: pointer;
+}
+
+.bouton-secondaire:hover {
+    border-color: var(--accent-dim);
+    color: var(--text);
+}
+
+.actions-modale {
+    display: flex;
+    gap: 0.75rem;
+    margin-top: 0.5rem;
+}
+
 .ecran-jeu {
     display: flex;
     height: 100vh;
@@ -164,6 +185,17 @@ html, body {
 .journal .avertissement {
     color: var(--danger);
     font-style: italic;
+}
+
+.indicateur-attente {
+    color: var(--text-dim);
+    font-style: italic;
+    animation: pulsation-attente 1.5s ease-in-out infinite;
+}
+
+@keyframes pulsation-attente {
+    0%, 100% { opacity: 0.5; }
+    50% { opacity: 1; }
 }
 
 .zone-saisie {

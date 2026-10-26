@@ -126,6 +126,12 @@ pub fn traiter_message(
             *etat = None;
             sur_message_ui(MessageVersUi::PartieReinitialisee);
         }
+
+        // Ce message n'est en réalité jamais remis à `traiter_message` : il
+        // est consommé directement dans `lancer()`, avant que la boucle qui
+        // appelle `traiter_message` ne démarre (voir plus bas). L'exhaustivité
+        // du `match` impose néanmoins ce bras.
+        MessageVersWorker::ConfirmerTelechargement(_) => {}
     }
 }
 
@@ -149,10 +155,43 @@ pub fn lancer(
         // ~2 Gio au lieu de l'échec rapide d'avant, sans que rien n'indique
         // pourquoi l'application reste bloquée plusieurs minutes.
         eprintln!(
-            "modèle absent à {}, téléchargement en cours depuis {}",
+            "modèle absent à {}, vérification de sa taille avant de demander confirmation (source : {})",
             chemin_modele.display(),
             crate::telechargement::MODELE_URL
         );
+
+        let taille_octets = match crate::telechargement::verifier_taille_modele() {
+            Ok(taille) => taille,
+            Err(erreur) => {
+                let _ = tx.unbounded_send(MessageVersUi::TourEchoue(format!(
+                    "échec de la vérification du modèle à télécharger : {erreur:?}"
+                )));
+                return;
+            }
+        };
+
+        let _ = tx.unbounded_send(MessageVersUi::ConfirmationTelechargementRequise(taille_octets));
+
+        // Bloque jusqu'à la réponse de l'utilisateur. Aucun autre message ne
+        // peut légitimement arriver ici : l'interface est sur l'écran de
+        // confirmation, dont les deux seuls boutons envoient
+        // `ConfirmerTelechargement` — on ignore donc tout le reste sans le
+        // perdre (plutôt qu'un `match` qui paniquerait dessus).
+        let confirme = loop {
+            match rx.recv() {
+                Ok(MessageVersWorker::ConfirmerTelechargement(reponse)) => break reponse,
+                Ok(_) => continue,
+                Err(_) => return,
+            }
+        };
+
+        if !confirme {
+            let _ = tx.unbounded_send(MessageVersUi::TourEchoue(
+                "téléchargement annulé — relance l'application pour réessayer".to_string(),
+            ));
+            return;
+        }
+
         let resultat = crate::telechargement::telecharger_modele(&chemin_modele, &mut |progression| {
             let _ = tx.unbounded_send(MessageVersUi::ProgressionTelechargement(progression));
         });
