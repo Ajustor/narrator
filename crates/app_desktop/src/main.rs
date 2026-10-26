@@ -15,13 +15,16 @@ type RxPartage =
 
 // `dioxus::LaunchBuilder::with_context` requires its value to be
 // `Any + Clone + Send + Sync + 'static` (its internal `ContextFn` is a
-// `Send + Sync` closure). Neither `std::sync::mpsc::Sender` (not `Sync`)
-// nor `RxPartage` (an `Rc<RefCell<_>>> — deliberately single-threaded,
-// not `Send`/`Sync` at all) satisfy that bound, so `.with_context(...)`
-// cannot carry them into the component tree here. We use the fallback
-// described in the plan instead: stash both values in thread-local
-// cells before `.launch(...)` and pull them out exactly once inside
-// `App`'s first render via `use_hook` (which only requires
+// `Send + Sync` closure). `RxPartage` (an `Rc<RefCell<_>>>` —
+// deliberately single-threaded) is neither `Send` nor `Sync` at all, so
+// it cannot go through `.with_context(...)`. `std::sync::mpsc::Sender`
+// IS `Sync` (since Rust 1.72, for `T: Send`, which `MessageVersWorker`
+// is), so it could in principle go through `.with_context` on its own —
+// but we route both values through the same thread-local + `use_hook`
+// mechanism below for consistency, rather than splitting them across two
+// different sharing strategies for no real benefit: stash both values in
+// thread-local cells before `.launch(...)` and pull them out exactly
+// once inside `App`'s first render via `use_hook` (which only requires
 // `Clone + 'static`). This is sound because `App`'s first render runs
 // synchronously on the same thread `main` calls `.launch()` from.
 thread_local! {
