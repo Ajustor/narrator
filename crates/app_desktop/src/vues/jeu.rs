@@ -50,6 +50,8 @@ pub fn Jeu(
                     }
                     if !narration_en_cours.is_empty() {
                         p { class: "narration-en-cours", "{narration_en_cours}" }
+                    } else if tour_en_cours {
+                        p { class: "narration-en-cours indicateur-attente", "Le narrateur réfléchit…" }
                     }
                 }
 
