@@ -144,6 +144,15 @@ pub fn lancer(
     chemin_sauvegarde: std::path::PathBuf,
 ) {
     if crate::telechargement::faut_il_telecharger(&chemin_modele) {
+        // Trace explicite : sur desktop, un `NARRATEUR_MODELE` mal
+        // orthographié déclencherait sinon un téléchargement silencieux de
+        // ~2 Gio au lieu de l'échec rapide d'avant, sans que rien n'indique
+        // pourquoi l'application reste bloquée plusieurs minutes.
+        eprintln!(
+            "modèle absent à {}, téléchargement en cours depuis {}",
+            chemin_modele.display(),
+            crate::telechargement::MODELE_URL
+        );
         let resultat = crate::telechargement::telecharger_modele(&chemin_modele, &mut |progression| {
             let _ = tx.unbounded_send(MessageVersUi::ProgressionTelechargement(progression));
         });

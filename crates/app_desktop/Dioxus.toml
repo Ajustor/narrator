@@ -1,0 +1,17 @@
+# Identité de l'application pour `dx build`/`dx bundle`.
+#
+# Sans ce fichier, `dx` génère une identité de remplacement
+# (`com.example.AppDesktop`) régénérée à chaque build : l'APK installée ne
+# peut alors pas être mise à jour en place de façon fiable, et le nom
+# affiché sur l'appareil est celui du crate (« AppDesktop ») et non celui
+# du jeu.
+#
+# Champs validés contre le schéma de `dx` 0.7 (`dx config schema`) :
+# `application.name` (nom affiché) et `bundle.identifier` (applicationId
+# Android / namespace Gradle).
+
+[application]
+name = "Narrateur"
+
+[bundle]
+identifier = "com.alexandregambier.narrateur"

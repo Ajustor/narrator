@@ -1,3 +1,15 @@
+// Les deux features de plateforme sélectionnent des backends Dioxus
+// différents (`dioxus/desktop` vs `dioxus/mobile`) et deux
+// implémentations distinctes de `worker::chemin_modele_par_defaut`. En
+// activer les deux, ou aucune, produit sinon des erreurs de compilation
+// très éloignées de la cause réelle (fonction manquante, backend absent) :
+// on signale donc l'erreur ici, à l'endroit où elle se comprend.
+#[cfg(all(feature = "plateforme-desktop", feature = "plateforme-android"))]
+compile_error!("les features plateforme-desktop et plateforme-android sont mutuellement exclusives");
+
+#[cfg(not(any(feature = "plateforme-desktop", feature = "plateforme-android")))]
+compile_error!("une feature de plateforme (plateforme-desktop ou plateforme-android) doit être activée");
+
 mod protocole;
 mod styles;
 mod telechargement;

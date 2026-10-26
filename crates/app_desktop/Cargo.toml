@@ -20,9 +20,16 @@ document = ["dioxus/document"]
 domain = { path = "../domain" }
 application = { path = "../application" }
 infra = { path = "../infra" }
-dioxus = { version = "0.7", default-features = false, features = ["document", "macro", "hooks", "signals", "html", "launch"] }
+dioxus = { version = "0.7", default-features = false, features = ["document", "macro", "hooks", "signals", "html", "launch", "logger"] }
 futures-channel = "0.3"
 futures-util = "0.3"
-ureq = { version = "2", default-features = false, features = ["rustls"] }
+# `features = ["tls"]` et non `["rustls"]` : dans ureq 2.x, `rustls` n'est
+# que le nom de la dépendance optionnelle — l'activer seul ne branche
+# aucun connecteur TLS, et tout appel HTTPS échoue immédiatement avec
+# `ErrorKind::UnknownScheme` ("no TLS backend is configured"). C'est la
+# feature `tls` qui active réellement le connecteur (rustls +
+# webpki-roots embarqués), ce dont le téléchargement du modèle depuis
+# huggingface.co dépend entièrement.
+ureq = { version = "2", default-features = false, features = ["tls"] }
 ndk-context = { version = "0.1", optional = true }
 jni = { version = "0.21", optional = true }
