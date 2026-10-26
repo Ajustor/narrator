@@ -178,15 +178,27 @@ impl Narrateur for LlamaNarrateur {
         // JSON et sa conversion en grammaire restent testés dans ce fichier
         // et dans `action_schema.rs`, au cas où une future version de
         // llama-cpp-2 corrige ce bug.
+        //
+        // Sans grammaire, le modèle 3B quantisé produit parfois un type
+        // d'action hors du schéma attendu (ex. observé en test réel :
+        // "je prépare une boule de feu" → {"action": "préparer_sort"},
+        // qui n'existe pas) — sans filet, cela faisait échouer tout le
+        // tour avec EchecGeneration. Puisqu'il n'existe de toute façon
+        // aucune action mécanique pour un sort non supporté, une sortie
+        // JSON non reconnue est traitée comme une action libre plutôt
+        // que comme une erreur : au pire, l'action est simplement
+        // racontée sans effet mécanique, au lieu de bloquer le tour.
         let prompt = construire_prompt_classification(contexte);
         let json_brut = self
             .generer(&prompt, TOKENS_MAX_CLASSIFICATION, None, &mut |_| {})
             .map_err(ErreurNarrateur::EchecGeneration)?;
-        let action = interpreter_json_action(&json_brut).map_err(|e| ErreurNarrateur::EchecGeneration(e.0))?;
+        let action =
+            interpreter_json_action(&json_brut).unwrap_or(ActionJoueur::ActionLibre(String::new()));
         // Le modèle n'est jamais chargé de reformuler la saisie du joueur : le
         // schéma JSON pour la variante "libre" ne contient plus de champ
         // "texte" (voir Fix 4), donc on substitue ici la saisie réelle du
-        // joueur, verbatim — comme le fait déjà `FauxNarrateur`.
+        // joueur, verbatim — comme le fait déjà `FauxNarrateur`. Ceci couvre
+        // aussi le cas de repli ci-dessus (sortie JSON non reconnue).
         let action = match action {
             ActionJoueur::ActionLibre(_) => ActionJoueur::ActionLibre(contexte.saisie_joueur.clone()),
             autre => autre,
