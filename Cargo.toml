@@ -5,6 +5,7 @@ members = [
     "crates/application",
     "crates/infra",
     "crates/app",
+    "crates/app_desktop",
 ]
 
 [profile.release]
