@@ -67,6 +67,20 @@ html, body {
     border-radius: 4px;
     padding: 0.5rem;
     font-size: 1rem;
+    /* WebKitGTK keeps native form-control chrome (a light background on
+       <select>/<input>) unless appearance is explicitly reset — without
+       this, the background/color rules above are silently ignored on
+       these two elements specifically. */
+    -webkit-appearance: none;
+    appearance: none;
+}
+
+.champ select {
+    background-image: linear-gradient(45deg, transparent 50%, var(--text-dim) 50%),
+        linear-gradient(135deg, var(--text-dim) 50%, transparent 50%);
+    background-position: calc(100% - 18px) calc(1rem + 2px), calc(100% - 13px) calc(1rem + 2px);
+    background-size: 5px 5px, 5px 5px;
+    background-repeat: no-repeat;
 }
 
 .bouton-principal {
