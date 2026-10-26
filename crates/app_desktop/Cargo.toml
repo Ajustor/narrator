@@ -12,7 +12,7 @@ plateforme-android = ["dioxus/mobile", "dep:ndk-context", "dep:jni"]
 domain = { path = "../domain" }
 application = { path = "../application" }
 infra = { path = "../infra" }
-dioxus = { version = "0.7", features = ["desktop", "document"] }
+dioxus = { version = "0.7", default-features = false, features = ["document", "macro", "hooks", "signals", "html", "launch"] }
 futures-channel = "0.3"
 futures-util = "0.3"
 ureq = { version = "2", default-features = false, features = ["rustls"] }
