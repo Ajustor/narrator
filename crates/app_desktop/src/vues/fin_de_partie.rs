@@ -11,11 +11,14 @@ pub fn FinDePartie(vainqueur: Option<Vainqueur>, sur_nouvelle_partie: EventHandl
     };
 
     rsx! {
-        div {
-            h1 { "{message}" }
-            button {
-                onclick: move |_| sur_nouvelle_partie.call(()),
-                "Nouvelle partie"
+        div { class: "ecran-centre",
+            div { class: "carte",
+                h1 { "{message}" }
+                button {
+                    class: "bouton-principal",
+                    onclick: move |_| sur_nouvelle_partie.call(()),
+                    "Nouvelle partie"
+                }
             }
         }
     }

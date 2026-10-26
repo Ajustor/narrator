@@ -1,4 +1,5 @@
 mod protocole;
+mod styles;
 mod vues;
 mod worker;
 
@@ -12,6 +13,19 @@ use vues::jeu::Jeu;
 
 type RxPartage =
     std::rc::Rc<std::cell::RefCell<Option<futures_channel::mpsc::UnboundedReceiver<MessageVersUi>>>>;
+
+/// Fait défiler le journal de narration jusqu'en bas. Appelé après tout
+/// ajout de contenu (fragment de narration ou ligne de journal), via
+/// `document::eval` — le signal Dioxus ne contrôle pas directement la
+/// position de défilement du DOM. Le script est une chaîne littérale
+/// fixe, sans aucune donnée interpolée (jamais de contenu venant du
+/// joueur ou du modèle) — `document::eval` est le mécanisme documenté de
+/// Dioxus pour ce besoin, pas une évaluation de code arbitraire externe.
+fn faire_defiler_journal() {
+    let _ = document::eval(
+        "let j = document.getElementById('journal'); if (j) { j.scrollTop = j.scrollHeight; }",
+    );
+}
 
 // `dioxus::LaunchBuilder::with_context` exige que sa valeur satisfasse
 // `Any + Clone + Send + Sync + 'static` (sa `ContextFn` interne est une
@@ -111,6 +125,7 @@ fn App() -> Element {
                 }
                 MessageVersUi::NarrationFragment(fragment) => {
                     narration_en_cours.write().push_str(&fragment);
+                    faire_defiler_journal();
                 }
                 MessageVersUi::TourTermine { etat: nouvel_etat, resultat_narration, resume_mecanique, combat_termine } => {
                     journal.write().push(resultat_narration);
@@ -119,6 +134,7 @@ fn App() -> Element {
                     }
                     narration_en_cours.set(String::new());
                     tour_en_cours.set(false);
+                    faire_defiler_journal();
                     let vainqueur = nouvel_etat.combat_en_cours.as_ref().and_then(|c| c.vainqueur);
                     etat.set(Some(nouvel_etat));
                     if combat_termine {
@@ -132,6 +148,7 @@ fn App() -> Element {
                         journal.write().push(format!("⚠ {}", message));
                         narration_en_cours.set(String::new());
                         tour_en_cours.set(false);
+                        faire_defiler_journal();
                     }
                 }
                 MessageVersUi::PartieReinitialisee => {
@@ -150,7 +167,7 @@ fn App() -> Element {
         }
     });
 
-    match vue() {
+    let vue_active = match vue() {
         Vue::ErreurChargement(message) => rsx! { ErreurChargement { message } },
         Vue::Creation => rsx! {
             Creation {
@@ -181,5 +198,10 @@ fn App() -> Element {
                 sur_nouvelle_partie: move |_| { let _ = tx.send(MessageVersWorker::NouvellePartie); }
             }
         },
+    };
+
+    rsx! {
+        document::Style { "{styles::CSS}" }
+        {vue_active}
     }
 }

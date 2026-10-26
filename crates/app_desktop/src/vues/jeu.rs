@@ -22,59 +22,64 @@ pub fn Jeu(
     };
 
     rsx! {
-        div {
-            header {
-                span { "{etat.lieu_actuel}" }
-                span { " — PV : {etat.personnage.pv_actuels}/{etat.personnage.pv_max}" }
-            }
+        div { class: "ecran-jeu",
+            div { class: "zone-principale",
+                header { class: "en-tete",
+                    span { class: "lieu", "{etat.lieu_actuel}" }
+                    span { "PV : {etat.personnage.pv_actuels}/{etat.personnage.pv_max}" }
+                }
 
-            if let Some(combat) = etat.combat_en_cours.as_ref() {
-                if !combat.termine {
-                    div {
-                        h3 { "Combat" }
-                        for ennemi in combat.ennemis.iter().filter(|e| !e.est_mort()) {
-                            div {
-                                key: "{ennemi.nom}",
-                                "{ennemi.nom} : {ennemi.pv_actuels}/{ennemi.pv_max} PV"
+                if let Some(combat) = etat.combat_en_cours.as_ref() {
+                    if !combat.termine {
+                        div { class: "panneau-combat",
+                            h3 { "Combat" }
+                            for ennemi in combat.ennemis.iter().filter(|e| !e.est_mort()) {
+                                div {
+                                    key: "{ennemi.nom}",
+                                    class: "ennemi",
+                                    "{ennemi.nom} : {ennemi.pv_actuels}/{ennemi.pv_max} PV"
+                                }
                             }
                         }
                     }
                 }
-            }
 
-            div {
-                for ligne in journal.iter() {
-                    p { "{ligne}" }
+                div { id: "journal", class: "journal",
+                    for ligne in journal.iter() {
+                        p { "{ligne}" }
+                    }
+                    if !narration_en_cours.is_empty() {
+                        p { class: "narration-en-cours", "{narration_en_cours}" }
+                    }
                 }
-                if !narration_en_cours.is_empty() {
-                    p { "{narration_en_cours}" }
-                }
-            }
 
-            div {
-                input {
-                    value: "{saisie}",
-                    disabled: tour_en_cours,
-                    oninput: move |evt| saisie.set(evt.value()),
-                    onkeydown: move |evt| {
-                        if evt.key() == Key::Enter {
-                            envoyer();
-                        }
-                    },
-                }
-                button {
-                    disabled: tour_en_cours,
-                    onclick: move |_| envoyer(),
-                    "Envoyer"
+                div { class: "zone-saisie",
+                    input {
+                        value: "{saisie}",
+                        disabled: tour_en_cours,
+                        oninput: move |evt| saisie.set(evt.value()),
+                        onkeydown: move |evt| {
+                            if evt.key() == Key::Enter {
+                                envoyer();
+                            }
+                        },
+                    }
+                    button {
+                        class: "bouton-principal",
+                        disabled: tour_en_cours,
+                        onclick: move |_| envoyer(),
+                        "Envoyer"
+                    }
                 }
             }
 
             if !etat.pnj_connus.is_empty() {
-                aside {
+                aside { class: "panneau-pnj",
                     h3 { "PNJ rencontrés" }
                     for pnj in etat.pnj_connus.iter() {
                         div {
                             key: "{pnj.nom}",
+                            class: "pnj",
                             onclick: {
                                 let nom = pnj.nom.clone();
                                 move |_| {

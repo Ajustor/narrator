@@ -7,6 +7,6 @@ edition = "2021"
 domain = { path = "../domain" }
 application = { path = "../application" }
 infra = { path = "../infra" }
-dioxus = { version = "0.7", features = ["desktop"] }
+dioxus = { version = "0.7", features = ["desktop", "document"] }
 futures-channel = "0.3"
 futures-util = "0.3"

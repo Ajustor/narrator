@@ -29,52 +29,55 @@ pub fn Creation(sur_creation: EventHandler<MessageVersWorker>) -> Element {
     let toutes_valeurs_choisies = move || valeurs().iter().all(|v| *v != 0);
 
     rsx! {
-        div {
-            h1 { "Création de personnage" }
-            div {
-                label { "Nom : " }
-                input {
-                    value: "{nom}",
-                    oninput: move |evt| nom.set(evt.value()),
-                }
-            }
-            div {
-                label { "Classe : " }
-                select {
-                    value: "{classe}",
-                    onchange: move |evt| classe.set(evt.value()),
-                    for c in CLASSES_VALIDES.iter() {
-                        option { key: "{c}", value: "{c}", "{c}" }
+        div { class: "ecran-centre",
+            div { class: "carte",
+                h1 { "Création de personnage" }
+                div { class: "champ",
+                    label { "Nom : " }
+                    input {
+                        value: "{nom}",
+                        oninput: move |evt| nom.set(evt.value()),
                     }
                 }
-            }
-            for (index, label) in NOMS_CARACTERISTIQUES.iter().enumerate() {
-                div {
-                    label { "{label} : " }
+                div { class: "champ",
+                    label { "Classe : " }
                     select {
-                        value: "{valeurs()[index]}",
-                        onchange: move |evt| {
-                            let mut v = valeurs();
-                            v[index] = evt.value().parse().unwrap_or(0);
-                            valeurs.set(v);
-                        },
-                        option { value: "0", "—" }
-                        for valeur in valeurs_disponibles(index) {
-                            option { key: "{valeur}", value: "{valeur}", "{valeur}" }
+                        value: "{classe}",
+                        onchange: move |evt| classe.set(evt.value()),
+                        for c in CLASSES_VALIDES.iter() {
+                            option { key: "{c}", value: "{c}", "{c}" }
                         }
                     }
                 }
-            }
-            button {
-                disabled: nom().trim().is_empty() || !toutes_valeurs_choisies(),
-                onclick: move |_| {
-                    sur_creation.call(MessageVersWorker::CreerPersonnage {
-                        nom: nom().trim().to_string(),
-                        classe: classe(),
-                        valeurs: valeurs(),
-                    });
-                },
-                "Commencer l'aventure"
+                for (index, label) in NOMS_CARACTERISTIQUES.iter().enumerate() {
+                    div { class: "champ",
+                        label { "{label} : " }
+                        select {
+                            value: "{valeurs()[index]}",
+                            onchange: move |evt| {
+                                let mut v = valeurs();
+                                v[index] = evt.value().parse().unwrap_or(0);
+                                valeurs.set(v);
+                            },
+                            option { value: "0", "—" }
+                            for valeur in valeurs_disponibles(index) {
+                                option { key: "{valeur}", value: "{valeur}", "{valeur}" }
+                            }
+                        }
+                    }
+                }
+                button {
+                    class: "bouton-principal",
+                    disabled: nom().trim().is_empty() || !toutes_valeurs_choisies(),
+                    onclick: move |_| {
+                        sur_creation.call(MessageVersWorker::CreerPersonnage {
+                            nom: nom().trim().to_string(),
+                            classe: classe(),
+                            valeurs: valeurs(),
+                        });
+                    },
+                    "Commencer l'aventure"
+                }
             }
         }
     }
