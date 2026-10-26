@@ -34,13 +34,13 @@ Relatif à la racine du dépôt :
 target/dx/app_desktop/debug/android/app/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-Soit, en absolu depuis ce plan de travail :
+Soit, en absolu depuis le dépôt principal (après la fusion de la branche `portage-android` dans `master`, le worktree de développement a été supprimé — c'est désormais le seul emplacement) :
 
 ```
-/home/alexandre/dev/narrator/.worktrees/portage-android/target/dx/app_desktop/debug/android/app/app/build/outputs/apk/debug/app-debug.apk
+/home/alexandre/dev/narrator/target/dx/app_desktop/debug/android/app/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-Taille : 94 540 316 octets (≈ 90 Mio).
+Taille : 96 112 216 octets (≈ 92 Mio).
 
 Contenu natif (`unzip -l`) :
 
@@ -89,11 +89,11 @@ Contenu natif (`unzip -l`) :
 ### Commande d'installation
 
 **Cette commande suppose que le répertoire courant du shell est la racine
-du dépôt** (`/home/alexandre/dev/narrator/.worktrees/portage-android`) ;
-sinon, utiliser le chemin absolu donné plus haut.
+du dépôt** (`/home/alexandre/dev/narrator`) ; sinon, utiliser le chemin
+absolu donné plus haut.
 
 ```bash
-cd /home/alexandre/dev/narrator/.worktrees/portage-android
+cd /home/alexandre/dev/narrator
 adb install -r target/dx/app_desktop/debug/android/app/app/build/outputs/apk/debug/app-debug.apk
 ```
 
