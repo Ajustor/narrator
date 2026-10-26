@@ -51,17 +51,14 @@ thread_local! {
 }
 
 fn main() {
-    let chemin_modele = std::env::var("NARRATEUR_MODELE").unwrap_or_else(|_| {
-        eprintln!("La variable d'environnement NARRATEUR_MODELE doit pointer vers un fichier .gguf.");
-        std::process::exit(1);
-    });
+    let chemin_modele = worker::chemin_modele_par_defaut();
     let chemin_sauvegarde = std::path::PathBuf::from("partie.json");
 
     let (tx_vers_worker, rx_vers_worker) = std::sync::mpsc::channel::<MessageVersWorker>();
     let (tx_vers_ui, rx_vers_ui) = futures_channel::mpsc::unbounded::<MessageVersUi>();
 
     std::thread::spawn({
-        let chemin_modele = std::path::PathBuf::from(chemin_modele);
+        let chemin_modele = chemin_modele.clone();
         let chemin_sauvegarde = chemin_sauvegarde.clone();
         move || worker::lancer(rx_vers_worker, tx_vers_ui, chemin_modele, chemin_sauvegarde)
     });

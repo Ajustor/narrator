@@ -10,6 +10,58 @@ use std::path::Path;
 
 use crate::protocole::{MessageVersUi, MessageVersWorker};
 
+/// Chemin du fichier modèle selon la plateforme.
+///
+/// Desktop : inchangé, lu depuis la variable d'environnement
+/// `NARRATEUR_MODELE` — ce chemin pointe déjà vers un fichier existant
+/// (téléchargé par `scripts/jouer.sh`), donc `telechargement::faut_il_telecharger`
+/// retournera toujours `false` en usage normal sur desktop.
+///
+/// Android : pas de variable d'environnement équivalente. Le modèle est
+/// téléchargé dans le répertoire de stockage privé de l'app, obtenu via
+/// JNI (`Activity.getFilesDir()`) à travers les crates `ndk-context`/`jni` —
+/// c'est le mécanisme standard pour ce besoin dans l'écosystème Rust/Android,
+/// mais il est à vérifier contre le vrai comportement du contexte Android
+/// que `dioxus`/`tao` initialisent au démarrage de l'app : si
+/// `ndk_context::android_context()` panique ou si l'API `jni` résolue
+/// diffère de celle utilisée ci-dessous, adapter ce code en conséquence
+/// plutôt que forcer cette signature — le compilateur et le comportement
+/// réel sur appareil font autorité.
+#[cfg(feature = "plateforme-desktop")]
+pub fn chemin_modele_par_defaut() -> std::path::PathBuf {
+    let chemin_modele = std::env::var("NARRATEUR_MODELE").unwrap_or_else(|_| {
+        eprintln!("La variable d'environnement NARRATEUR_MODELE doit pointer vers un fichier .gguf.");
+        std::process::exit(1);
+    });
+    std::path::PathBuf::from(chemin_modele)
+}
+
+#[cfg(feature = "plateforme-android")]
+pub fn chemin_modele_par_defaut() -> std::path::PathBuf {
+    let ctx = ndk_context::android_context();
+    let vm = unsafe { jni::JavaVM::from_raw(ctx.vm().cast()) }
+        .expect("JavaVM Android valide fournie par le contexte natif");
+    let activity = unsafe { jni::objects::JObject::from_raw(ctx.context().cast()) };
+    let mut env = vm
+        .attach_current_thread()
+        .expect("attachement du thread courant à la JVM Android");
+    let fichier = env
+        .call_method(&activity, "getFilesDir", "()Ljava/io/File;", &[])
+        .expect("appel de Activity.getFilesDir()")
+        .l()
+        .expect("getFilesDir() retourne un java.io.File");
+    let chemin_jstring = env
+        .call_method(&fichier, "getAbsolutePath", "()Ljava/lang/String;", &[])
+        .expect("appel de File.getAbsolutePath()")
+        .l()
+        .expect("getAbsolutePath() retourne une java.lang.String");
+    let chemin_java_str = env
+        .get_string(&jni::objects::JString::from(chemin_jstring))
+        .expect("conversion JString -> JavaStr");
+    let repertoire = std::path::PathBuf::from(chemin_java_str.to_str().expect("UTF-8 valide"));
+    repertoire.join("Qwen2.5-3B-Instruct-Q4_K_M.gguf")
+}
+
 pub fn traiter_message(
     etat: &mut Option<EtatPartie>,
     message: MessageVersWorker,
@@ -86,6 +138,18 @@ pub fn lancer(
     chemin_modele: std::path::PathBuf,
     chemin_sauvegarde: std::path::PathBuf,
 ) {
+    if crate::telechargement::faut_il_telecharger(&chemin_modele) {
+        let resultat = crate::telechargement::telecharger_modele(&chemin_modele, &mut |progression| {
+            let _ = tx.unbounded_send(MessageVersUi::ProgressionTelechargement(progression));
+        });
+        if let Err(erreur) = resultat {
+            let _ = tx.unbounded_send(MessageVersUi::TourEchoue(format!(
+                "échec du téléchargement du modèle : {erreur:?}"
+            )));
+            return;
+        }
+    }
+
     let mut narrateur = match infra::LlamaNarrateur::charger(&chemin_modele) {
         Ok(narrateur) => narrateur,
         Err(erreur) => {
