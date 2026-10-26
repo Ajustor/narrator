@@ -3,6 +3,17 @@ name = "app_desktop"
 version = "0.1.0"
 edition = "2021"
 
+# Nom du binaire produit — c'est de là que `dx` dérive le libellé affiché
+# sur l'écran d'accueil Android (confirmé empiriquement : `dx` 0.7.9
+# ignore `[application] name` dans Dioxus.toml pour Android et utilise ce
+# nom à la place). Renommé en "Narrator" pour cette raison ; n'affecte ni
+# le nom du crate/package ci-dessus, ni l'identifiant Android
+# (`bundle.identifier` dans Dioxus.toml), seulement le nom de
+# l'exécutable produit (desktop et Android).
+[[bin]]
+name = "Narrator"
+path = "src/main.rs"
+
 [features]
 default = ["plateforme-desktop"]
 plateforme-desktop = ["dioxus/desktop"]
