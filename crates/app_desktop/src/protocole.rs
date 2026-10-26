@@ -15,6 +15,7 @@ pub enum MessageVersUi {
     TourTermine { etat: EtatPartie, resultat_narration: String, resume_mecanique: Vec<String>, combat_termine: bool },
     TourEchoue(String),
     PartieReinitialisee,
+    ProgressionTelechargement(f32),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -23,4 +24,5 @@ pub enum Vue {
     Jeu,
     FinDePartie(Option<Vainqueur>),
     ErreurChargement(String),
+    Telechargement(f32),
 }

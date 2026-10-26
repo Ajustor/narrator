@@ -11,6 +11,7 @@ use vues::creation::Creation;
 use vues::erreur_chargement::ErreurChargement;
 use vues::fin_de_partie::FinDePartie;
 use vues::jeu::Jeu;
+use vues::telechargement::Telechargement;
 
 type RxPartage =
     std::rc::Rc<std::cell::RefCell<Option<futures_channel::mpsc::UnboundedReceiver<MessageVersUi>>>>;
@@ -152,6 +153,9 @@ fn App() -> Element {
                         faire_defiler_journal();
                     }
                 }
+                MessageVersUi::ProgressionTelechargement(progression) => {
+                    vue.set(Vue::Telechargement(progression));
+                }
                 MessageVersUi::PartieReinitialisee => {
                     etat.set(None);
                     journal.set(Vec::new());
@@ -193,6 +197,7 @@ fn App() -> Element {
                 }
             }
         }
+        Vue::Telechargement(progression) => rsx! { Telechargement { progression } },
         Vue::FinDePartie(vainqueur) => rsx! {
             FinDePartie {
                 vainqueur,

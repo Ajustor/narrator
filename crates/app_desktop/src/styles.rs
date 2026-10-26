@@ -228,4 +228,18 @@ html, body {
     font-size: 0.8rem;
     color: var(--text-dim);
 }
+
+.barre-progression {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    height: 1rem;
+    overflow: hidden;
+}
+
+.barre-progression-remplissage {
+    background: var(--accent);
+    height: 100%;
+    transition: width 0.2s ease;
+}
 "#;
