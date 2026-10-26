@@ -3,7 +3,6 @@ use domain::EtatPartie;
 
 use crate::protocole::MessageVersWorker;
 
-#[allow(dead_code)]
 #[component]
 pub fn Jeu(
     etat: EtatPartie,
@@ -70,24 +69,26 @@ pub fn Jeu(
                 }
             }
 
-            aside {
-                h3 { "PNJ rencontrés" }
-                for pnj in etat.pnj_connus.iter() {
-                    div {
-                        key: "{pnj.nom}",
-                        onclick: {
-                            let nom = pnj.nom.clone();
-                            move |_| {
-                                let actuel = pnj_deplie();
-                                pnj_deplie.set(if actuel.as_deref() == Some(nom.as_str()) { None } else { Some(nom.clone()) });
-                            }
-                        },
-                        strong { "{pnj.nom}" }
-                        span { " — {pnj.description}" }
-                        if pnj_deplie().as_deref() == Some(pnj.nom.as_str()) {
-                            ul {
-                                for entree in pnj.historique.iter() {
-                                    li { "{entree}" }
+            if !etat.pnj_connus.is_empty() {
+                aside {
+                    h3 { "PNJ rencontrés" }
+                    for pnj in etat.pnj_connus.iter() {
+                        div {
+                            key: "{pnj.nom}",
+                            onclick: {
+                                let nom = pnj.nom.clone();
+                                move |_| {
+                                    let actuel = pnj_deplie();
+                                    pnj_deplie.set(if actuel.as_deref() == Some(nom.as_str()) { None } else { Some(nom.clone()) });
+                                }
+                            },
+                            strong { "{pnj.nom}" }
+                            span { " — {pnj.description}" }
+                            if pnj_deplie().as_deref() == Some(pnj.nom.as_str()) {
+                                ul {
+                                    for entree in pnj.historique.iter() {
+                                        li { "{entree}" }
+                                    }
                                 }
                             }
                         }

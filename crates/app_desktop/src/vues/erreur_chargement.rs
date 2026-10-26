@@ -1,6 +1,5 @@
 use dioxus::prelude::*;
 
-#[allow(dead_code)]
 #[component]
 pub fn ErreurChargement(message: String) -> Element {
     rsx! {

@@ -6,7 +6,6 @@ use crate::protocole::MessageVersWorker;
 const NOMS_CARACTERISTIQUES: [&str; 6] =
     ["Force", "Dextérité", "Constitution", "Intelligence", "Sagesse", "Charisme"];
 
-#[allow(dead_code)]
 #[component]
 pub fn Creation(sur_creation: EventHandler<MessageVersWorker>) -> Element {
     let mut nom = use_signal(String::new);
@@ -67,10 +66,10 @@ pub fn Creation(sur_creation: EventHandler<MessageVersWorker>) -> Element {
                 }
             }
             button {
-                disabled: !toutes_valeurs_choisies(),
+                disabled: nom().trim().is_empty() || !toutes_valeurs_choisies(),
                 onclick: move |_| {
                     sur_creation.call(MessageVersWorker::CreerPersonnage {
-                        nom: nom(),
+                        nom: nom().trim().to_string(),
                         classe: classe(),
                         valeurs: valeurs(),
                     });

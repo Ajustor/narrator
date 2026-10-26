@@ -1,7 +1,6 @@
 use dioxus::prelude::*;
 use domain::Vainqueur;
 
-#[allow(dead_code)]
 #[component]
 pub fn FinDePartie(vainqueur: Option<Vainqueur>, sur_nouvelle_partie: EventHandler<()>) -> Element {
     let message = match vainqueur {

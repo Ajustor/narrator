@@ -80,7 +80,6 @@ pub fn charger_etat_initial(sauvegarde: &dyn Sauvegarde) -> Option<EtatPartie> {
     }
 }
 
-#[allow(dead_code)]
 pub fn lancer(
     rx: std::sync::mpsc::Receiver<MessageVersWorker>,
     tx: futures_channel::mpsc::UnboundedSender<MessageVersUi>,

@@ -13,20 +13,21 @@ use vues::jeu::Jeu;
 type RxPartage =
     std::rc::Rc<std::cell::RefCell<Option<futures_channel::mpsc::UnboundedReceiver<MessageVersUi>>>>;
 
-// `dioxus::LaunchBuilder::with_context` requires its value to be
-// `Any + Clone + Send + Sync + 'static` (its internal `ContextFn` is a
-// `Send + Sync` closure). `RxPartage` (an `Rc<RefCell<_>>>` —
-// deliberately single-threaded) is neither `Send` nor `Sync` at all, so
-// it cannot go through `.with_context(...)`. `std::sync::mpsc::Sender`
-// IS `Sync` (since Rust 1.72, for `T: Send`, which `MessageVersWorker`
-// is), so it could in principle go through `.with_context` on its own —
-// but we route both values through the same thread-local + `use_hook`
-// mechanism below for consistency, rather than splitting them across two
-// different sharing strategies for no real benefit: stash both values in
-// thread-local cells before `.launch(...)` and pull them out exactly
-// once inside `App`'s first render via `use_hook` (which only requires
-// `Clone + 'static`). This is sound because `App`'s first render runs
-// synchronously on the same thread `main` calls `.launch()` from.
+// `dioxus::LaunchBuilder::with_context` exige que sa valeur satisfasse
+// `Any + Clone + Send + Sync + 'static` (sa `ContextFn` interne est une
+// closure `Send + Sync`). `RxPartage` (un `Rc<RefCell<_>>>` —
+// volontairement mono-thread) n'est ni `Send` ni `Sync` du tout, donc il
+// ne peut pas passer par `.with_context(...)`. `std::sync::mpsc::Sender`
+// EST `Sync` (depuis Rust 1.72, pour `T: Send`, ce qu'est
+// `MessageVersWorker`), donc il pourrait en principe passer par
+// `.with_context` seul — mais on fait transiter les deux valeurs par le
+// même mécanisme thread-local + `use_hook` ci-dessous, par cohérence,
+// plutôt que de les répartir sur deux stratégies de partage différentes
+// sans bénéfice réel : on range les deux valeurs dans des cellules
+// thread-local avant `.launch(...)`, puis on les récupère exactement une
+// fois au premier rendu d'`App` via `use_hook` (qui exige seulement
+// `Clone + 'static`). C'est sûr car le premier rendu d'`App` s'exécute de
+// façon synchrone sur le même thread que celui qui appelle `.launch()`.
 thread_local! {
     static TX_INITIAL: std::cell::RefCell<Option<std::sync::mpsc::Sender<MessageVersWorker>>> =
         std::cell::RefCell::new(None);
@@ -49,15 +50,16 @@ fn main() {
         move || worker::lancer(rx_vers_worker, tx_vers_ui, chemin_modele, chemin_sauvegarde)
     });
 
-    // `UnboundedReceiver<MessageVersUi>` has a single owner and is not
-    // `Clone` — it can't be handed to the root component as an ordinary
-    // value the way `tx_vers_worker` (whose `Sender` type IS `Clone`)
-    // can. `Rc<RefCell<Option<_>>>` is the standard one-time handoff for
-    // this: cloning the `Rc` is cheap and shares the same cell, and
-    // `.take()` inside `App`'s `use_future` (which Dioxus only ever runs
-    // once, on first render) extracts the real receiver exactly once.
-    // `Rc`/`RefCell` (not `Arc`/`Mutex`) are correct here — this value
-    // never leaves the Dioxus UI thread.
+    // `UnboundedReceiver<MessageVersUi>` n'a qu'un seul propriétaire et
+    // n'est pas `Clone` — on ne peut pas le confier au composant racine
+    // comme une valeur ordinaire, contrairement à `tx_vers_worker` (dont
+    // le type `Sender` EST `Clone`). `Rc<RefCell<Option<_>>>` est le
+    // transfert à usage unique standard pour ce cas : cloner le `Rc` est
+    // peu coûteux et partage la même cellule, et `.take()` dans le
+    // `use_future` d'`App` (que Dioxus n'exécute qu'une seule fois, au
+    // premier rendu) extrait le vrai récepteur exactement une fois.
+    // `Rc`/`RefCell` (et non `Arc`/`Mutex`) sont corrects ici — cette
+    // valeur ne quitte jamais le thread d'interface de Dioxus.
     let rx_partage: RxPartage = std::rc::Rc::new(std::cell::RefCell::new(Some(rx_vers_ui)));
 
     TX_INITIAL.with(|cell| *cell.borrow_mut() = Some(tx_vers_worker));
@@ -110,8 +112,11 @@ fn App() -> Element {
                 MessageVersUi::NarrationFragment(fragment) => {
                     narration_en_cours.write().push_str(&fragment);
                 }
-                MessageVersUi::TourTermine { etat: nouvel_etat, resultat_narration, combat_termine, .. } => {
+                MessageVersUi::TourTermine { etat: nouvel_etat, resultat_narration, resume_mecanique, combat_termine } => {
                     journal.write().push(resultat_narration);
+                    for ligne in resume_mecanique {
+                        journal.write().push(ligne);
+                    }
                     narration_en_cours.set(String::new());
                     tour_en_cours.set(false);
                     let vainqueur = nouvel_etat.combat_en_cours.as_ref().and_then(|c| c.vainqueur);
@@ -125,6 +130,7 @@ fn App() -> Element {
                         vue.set(Vue::ErreurChargement(message));
                     } else {
                         journal.write().push(format!("⚠ {}", message));
+                        narration_en_cours.set(String::new());
                         tour_en_cours.set(false);
                     }
                 }
@@ -135,6 +141,12 @@ fn App() -> Element {
                 }
             }
         }
+        // Le canal s'est fermé : le thread de jeu s'est arrêté de façon
+        // inattendue (panique ou fin de vie). Rendre cet arrêt visible
+        // plutôt que de laisser la fenêtre figée sans aucune explication.
+        vue.set(Vue::ErreurChargement(
+            "le moteur de jeu s'est arrêté de façon inattendue — voir la sortie console pour le détail".to_string(),
+        ));
         }
     });
 
@@ -157,6 +169,7 @@ fn App() -> Element {
                     tour_en_cours: tour_en_cours(),
                     sur_action: move |msg| {
                         tour_en_cours.set(true);
+                        narration_en_cours.set(String::new());
                         let _ = tx.send(msg);
                     },
                 }
