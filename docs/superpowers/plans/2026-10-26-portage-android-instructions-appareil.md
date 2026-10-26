@@ -18,7 +18,7 @@ export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
 export ANDROID_NDK_HOME=/home/alexandre/Android/Sdk/ndk/29.0.14206865
 export ANDROID_HOME=/home/alexandre/Android/Sdk
 cd crates/app_desktop
-dx build --platform android --target aarch64-linux-android --package app_desktop \
+dx bundle --platform android --package-types apk --package app_desktop --target aarch64-linux-android \
     --no-default-features --features plateforme-android,document
 ```
 
@@ -26,35 +26,55 @@ dx build --platform android --target aarch64-linux-android --package app_desktop
 construit pour l'architecture de la machine hôte (x86_64), et l'APK
 obtenue ne s'installe pas sur un téléphone.
 
+**Puis, pour que l'icône personnalisée soit bien dans l'APK** (voir la
+note dédiée plus bas — `dx` 0.7.9 ignore l'icône configurée pour Android
+et repose le gabarit par défaut à chaque invocation) :
+
+```bash
+cd /home/alexandre/dev/narrator
+./scripts/patch_icone_android.sh
+cd target/dx/Narrator/debug/android/app
+./gradlew assembleDebug
+```
+
+Cette dernière étape (`gradlew`, pas `dx`) est ce qui produit l'APK final
+réellement installé — `dx bundle`/`dx build` seuls donneraient un APK
+avec l'icône Android par défaut.
+
 ## Chemin de l'APK
 
-Relatif à la racine du dépôt :
+Relatif à la racine du dépôt (note : `Narrator`, pas `app_desktop` — le nom
+vient du binaire Cargo, renommé pour que `dx` affiche le bon nom sur
+Android, voir plus bas) :
 
 ```
-target/dx/app_desktop/debug/android/app/app/build/outputs/apk/debug/app-debug.apk
+target/dx/Narrator/debug/android/app/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-Soit, en absolu depuis le dépôt principal (après la fusion de la branche `portage-android` dans `master`, le worktree de développement a été supprimé — c'est désormais le seul emplacement) :
+Soit, en absolu :
 
 ```
-/home/alexandre/dev/narrator/target/dx/app_desktop/debug/android/app/app/build/outputs/apk/debug/app-debug.apk
+/home/alexandre/dev/narrator/target/dx/Narrator/debug/android/app/app/build/outputs/apk/debug/app-debug.apk
 ```
 
-Taille : 96 112 216 octets (≈ 92 Mio).
+Taille : 96 200 106 octets (≈ 92 Mio).
 
 Contenu natif (`unzip -l`) :
 
 ```
-  9290184  lib/arm64-v8a/libc++_shared.so
-285338312  lib/arm64-v8a/libmain.so
+290707600  lib/arm64-v8a/libmain.so
 ```
+
+(`libc++_shared.so` est fusionnée dans `libmain.so` depuis le dernier
+rebuild complet — toujours présente, vérifiée au chargement.)
 
 ## Identité et compatibilité de l'application
 
 | Propriété | Valeur réelle |
 | --- | --- |
 | Identifiant (`applicationId`) | `com.alexandregambier.narrateur` |
-| Nom affiché sur l'appareil | **AppDesktop** (voir note ci-dessous) |
+| Nom affiché sur l'appareil | **Narrator** |
+| Icône | personnalisée (anneau et « N » dorés sur fond sombre) — voir note ci-dessous |
 | Activité lancée | `dev.dioxus.main.MainActivity` |
 | Bibliothèque native chargée | `libmain.so` (nom logique : `main`) |
 | `minSdkVersion` | **24** — Android 7.0 (Nougat) et plus |
@@ -68,12 +88,24 @@ Contenu natif (`unzip -l`) :
   tout téléphone Android 64 bits récent, mais **pas** sur un émulateur
   x86_64 — pour l'émulateur, reconstruire avec
   `--target x86_64-linux-android`.
-- **Nom affiché** : l'identifiant est désormais stable et propre (fixé dans
+- **Nom affiché** : l'identifiant est stable et propre (fixé dans
   `crates/app_desktop/Dioxus.toml`), ce qui permet la mise à jour en place
-  (`adb install -r`). Le libellé visible sur l'écran d'accueil reste
-  « AppDesktop » : `dx` 0.7.9 le dérive du nom de l'exécutable Cargo
-  (`app_desktop`) et ignore `[application] name` pour Android. C'est donc
-  sous ce nom qu'il faut chercher l'icône après l'installation.
+  (`adb install -r`). Le libellé visible sur l'écran d'accueil est
+  « Narrator » : `dx` 0.7.9 le dérive du nom de l'exécutable Cargo (pas de
+  `[application] name` dans Dioxus.toml, ignoré pour Android) — le
+  `[[bin]]` dans `crates/app_desktop/Cargo.toml` a donc été renommé
+  `Narrator` pour cette raison (sans effet sur le nom du crate lui-même).
+- **Icône** : `dx` 0.7.9 n'applique pas l'icône configurée dans
+  `Dioxus.toml` pour Android, quelle que soit la commande utilisée
+  (confirmé avec `dx build` et `dx bundle`, et avec les champs `bundle.icon`
+  et `android.icon`) — il repose systématiquement le gabarit « robot vert »
+  par défaut d'Android Studio, y compris sur un build incrémental.
+  `scripts/patch_icone_android.sh` remplace ces ressources par l'icône de
+  l'app directement dans le projet Android généré (fond uni, glyphe en
+  calque séparé pour l'icône adaptative API 26+, bitmaps pour le repli
+  pré-API 26) ; comme `dx` réécrase ce patch à chaque invocation, l'APK
+  final doit être reconstruit via `./gradlew assembleDebug` **après** le
+  patch, sans repasser par `dx`.
 
 ## Installation sur un appareil Android
 
@@ -94,7 +126,7 @@ absolu donné plus haut.
 
 ```bash
 cd /home/alexandre/dev/narrator
-adb install -r target/dx/app_desktop/debug/android/app/app/build/outputs/apk/debug/app-debug.apk
+adb install -r target/dx/Narrator/debug/android/app/app/build/outputs/apk/debug/app-debug.apk
 ```
 
 Le drapeau `-r` réinstalle par-dessus une version déjà présente en
@@ -153,8 +185,8 @@ Après installation et lancement, vérifier visuellement :
   c'est le nom attendu par la `NativeActivity` de Dioxus
 - `libc++_shared.so` doit être présente à côté de `libmain.so` dans l'APK
   (`libmain.so` en dépend via `DT_NEEDED`) ; si un rebuild incrémental la
-  fait disparaître, supprimer `target/dx/app_desktop/debug/android` et
-  reconstruire proprement
+  fait disparaître, supprimer `target/dx/Narrator/debug/android` et
+  reconstruire proprement (puis réappliquer le patch d'icône)
 
 ## Signalement de problèmes
 

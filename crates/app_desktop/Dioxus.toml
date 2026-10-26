@@ -17,10 +17,26 @@
 # Ce champ reste présent car il s'applique correctement aux autres
 # plateformes (desktop) et pourrait être pris en compte par une future
 # version de `dx` pour Android.
+#
+# NOTE CONFIRMÉE EMPIRIQUEMENT (même limitation) : ni `bundle.icon` ni
+# `android.icon` ci-dessous ne sont appliqués par `dx` 0.7.9 pour Android —
+# testé avec `dx build` ET `dx bundle`, les deux régénèrent
+# systématiquement le gabarit d'icône par défaut d'Android Studio, à
+# chaque invocation. Les deux champs restent déclarés (inoffensifs, et
+# corrects pour desktop) au cas où une future version de `dx` les
+# applique enfin pour Android ; en attendant, c'est
+# `scripts/patch_icone_android.sh` qui pose la vraie icône après coup —
+# voir ce script et les instructions d'installation Android pour la
+# séquence complète (le patch doit être réappliqué après tout
+# `dx build`/`dx bundle`, puis le paquet reconstruit via `./gradlew
+# assembleDebug` directement, sans repasser par `dx`).
 
 [application]
 name = "Narrator"
 
 [bundle]
 identifier = "com.alexandregambier.narrateur"
+icon = ["assets/icon.png"]
+
+[android]
 icon = ["assets/icon.png"]
