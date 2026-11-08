@@ -1,14 +1,16 @@
 use dioxus::prelude::*;
 
-/// Conseil affiché sous le message d'erreur. Cet écran ne sert plus
-/// seulement à l'échec de *chargement* du modèle : il affiche aussi les
-/// échecs de *téléchargement* (Android, premier lancement) et l'arrêt
-/// inattendu du moteur. Le conseil dépend donc de la plateforme plutôt
-/// que de supposer un contexte desktop : sur Android, `NARRATEUR_MODELE`
-/// n'existe pas du tout, et conseiller d'y pointer un `.gguf` n'aurait
-/// aucun sens pour un joueur dont le téléchargement a échoué.
+/// Conseil affiché sous le message d'erreur. Cet écran n'est plus affiché
+/// que lorsque le thread worker est mort de façon fatale et irrécupérable :
+/// tout échec récupérable (téléchargement, chargement du modèle) passe
+/// désormais par un autre mécanisme et retourne à l'écran de sélection des
+/// histoires plutôt que d'arriver ici. Le conseil dépend tout de même de
+/// la plateforme : desktop n'a plus de variable d'environnement
+/// `NARRATEUR_MODELE` (les modèles sont téléchargés à la demande depuis le
+/// catalogue, comme sur Android), donc il n'y a rien de spécifique à
+/// conseiller au-delà de relancer l'application.
 #[cfg(feature = "plateforme-desktop")]
-const CONSEIL: &str = "Vérifie ta connexion réseau, l'espace de stockage disponible, et que la variable d'environnement NARRATEUR_MODELE pointe vers un fichier .gguf valide, puis relance l'application.";
+const CONSEIL: &str = "Le moteur de jeu s'est arrêté de façon inattendue. Relance l'application.";
 
 #[cfg(feature = "plateforme-android")]
 const CONSEIL: &str = "Vérifie ta connexion réseau et l'espace de stockage disponible, puis relance l'application.";

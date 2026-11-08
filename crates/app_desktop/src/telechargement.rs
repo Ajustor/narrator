@@ -8,10 +8,13 @@ pub enum ErreurTelechargement {
 }
 
 /// Décision pure : le fichier modèle est-il déjà présent à l'emplacement
-/// attendu ? Sur desktop, ce chemin pointe déjà vers un fichier existant
-/// (téléchargé par `scripts/jouer.sh` avant le lancement) — cette fonction
-/// retourne donc `false` et le téléchargement ne se déclenche jamais en
-/// usage normal sur desktop.
+/// attendu ? Desktop télécharge désormais les modèles manquants à la
+/// demande depuis le catalogue, exactement comme Android — ce n'est plus
+/// une garantie de plateforme que le fichier existe déjà. La seule raison
+/// pour laquelle un poste de développement avec `scripts/jouer.sh` évite
+/// souvent le téléchargement est une coïncidence de nommage : le fichier
+/// qu'il télécharge déjà (`modeles/Qwen2.5-3B-Instruct-Q4_K_M.gguf`)
+/// correspond au nom attendu par la palette Équilibré.
 pub fn faut_il_telecharger(chemin_modele: &Path) -> bool {
     !chemin_modele.exists()
 }

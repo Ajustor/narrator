@@ -123,10 +123,14 @@ pub fn traiter_message(
             match resultat {
                 Ok(resultat) => {
                     if resultat.partie_terminee {
-                        let _ = std::fs::remove_file(contexte.chemin_sauvegarde);
-                        let _ = histoires::retirer(contexte.repertoire_sauvegardes, contexte.id);
-                    } else {
-                        let _ = sauvegarder_partie(contexte.sauvegarde, etat_courant);
+                        if let Err(erreur) = std::fs::remove_file(contexte.chemin_sauvegarde) {
+                            eprintln!("échec de la suppression du fichier de sauvegarde : {erreur:?}");
+                        }
+                        if let Err(erreur) = histoires::retirer(contexte.repertoire_sauvegardes, contexte.id) {
+                            eprintln!("échec du retrait de l'histoire de l'index : {erreur:?}");
+                        }
+                    } else if let Err(erreur) = sauvegarder_partie(contexte.sauvegarde, etat_courant) {
+                        eprintln!("échec de l'écriture de la sauvegarde : {erreur:?}");
                     }
                     sur_message_ui(MessageVersUi::TourTermine {
                         etat: etat_courant.clone(),
@@ -162,7 +166,7 @@ pub enum ActionApresHistoire {
 
 /// Traite les tours d'une histoire déjà chargée jusqu'à un retour
 /// explicite à la sélection (`RetourSelection`, envoyé par le bouton
-/// "Nouvelle partie" de l'écran de fin) ou la fermeture du canal.
+/// "Retour à la sélection" de l'écran de fin) ou la fermeture du canal.
 fn jouer_histoire(
     rx: &std::sync::mpsc::Receiver<MessageVersWorker>,
     tx: &futures_channel::mpsc::UnboundedSender<MessageVersUi>,
@@ -300,9 +304,18 @@ pub fn lancer(
         // modèle a réellement chargé — pas avant, pour ne jamais laisser
         // une entrée fantôme dans l'index si le chargement échoue ou si
         // l'utilisateur annule le téléchargement.
+        //
+        // Ordre important : sauvegarder la partie d'abord, puis ajouter
+        // l'entrée dans l'index. Si l'écriture de la sauvegarde échoue,
+        // l'index ne doit pas pointer vers un fichier de sauvegarde
+        // manquant.
         if !deja_enregistree {
-            let _ = histoires::ajouter(&repertoire_sauvegardes, info.clone());
-            let _ = sauvegarder_partie(&sauvegarde, &etat_initial);
+            if let Err(erreur) = sauvegarder_partie(&sauvegarde, &etat_initial) {
+                eprintln!("échec de l'écriture de la sauvegarde initiale : {erreur:?}");
+            }
+            if let Err(erreur) = histoires::ajouter(&repertoire_sauvegardes, info.clone()) {
+                eprintln!("échec d'enregistrement de l'histoire dans l'index : {erreur:?}");
+            }
         }
 
         let _ = tx.unbounded_send(MessageVersUi::PartieCreee(etat_initial.clone()));

@@ -20,9 +20,23 @@ const NOM_INDEX: &str = "index.json";
 pub fn lister(repertoire_sauvegardes: &Path) -> Vec<InfoHistoire> {
     let chemin_index = repertoire_sauvegardes.join(NOM_INDEX);
     let Ok(contenu) = std::fs::read_to_string(&chemin_index) else {
-        return Vec::new();
+        return Vec::new(); // fichier absent : premier lancement, pas une erreur
     };
-    let mut histoires: Vec<InfoHistoire> = serde_json::from_str(&contenu).unwrap_or_default();
+    let mut histoires: Vec<InfoHistoire> = match serde_json::from_str(&contenu) {
+        Ok(histoires) => histoires,
+        Err(_) => {
+            // Index présent mais corrompu : ne pas le traiter comme "vide"
+            // silencieusement, ce qui ferait perdre l'accès à toutes les
+            // histoires existantes dès le prochain ajouter() (qui réécrirait
+            // l'index avec la seule nouvelle entrée). On le renomme de côté
+            // pour qu'un humain puisse le récupérer, et on continue avec une
+            // liste vide pour cette fois (comportement visible plutôt que
+            // perte silencieuse).
+            let chemin_corrompu = chemin_index.with_extension("json.corrompu");
+            let _ = std::fs::rename(&chemin_index, &chemin_corrompu);
+            Vec::new()
+        }
+    };
     histoires.sort_by(|a, b| b.cree_le.cmp(&a.cree_le));
     histoires
 }
@@ -156,6 +170,27 @@ mod tests {
         assert!(
             !repertoire.join("index.json.tmp").exists(),
             "le .tmp doit avoir été renommé vers index.json"
+        );
+        let _ = std::fs::remove_dir_all(&repertoire);
+    }
+
+    #[test]
+    fn lister_avec_index_corrompu_renomme_le_fichier_et_retourne_une_liste_vide() {
+        let repertoire = repertoire_temporaire("corrompu");
+        std::fs::create_dir_all(&repertoire).unwrap();
+        let chemin_index = repertoire.join(NOM_INDEX);
+        std::fs::write(&chemin_index, "ceci n'est pas du json valide").unwrap();
+
+        let histoires = lister(&repertoire);
+
+        assert_eq!(histoires, Vec::new());
+        assert!(
+            !chemin_index.exists(),
+            "l'index corrompu ne doit plus être à son emplacement d'origine"
+        );
+        assert!(
+            repertoire.join("index.json.corrompu").exists(),
+            "l'index corrompu doit être renommé en .json.corrompu"
         );
         let _ = std::fs::remove_dir_all(&repertoire);
     }
