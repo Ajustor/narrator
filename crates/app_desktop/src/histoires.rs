@@ -56,10 +56,17 @@ pub fn retirer(repertoire_sauvegardes: &Path, id: &str) -> std::io::Result<()> {
     ecrire_index(repertoire_sauvegardes, &histoires)
 }
 
+/// Écrit l'index de façon atomique : contenu complet dans un `.tmp` puis
+/// renommage vers `index.json`, même principe que `telechargement.rs`. Un
+/// arrêt en plein milieu de l'écriture ne peut ainsi jamais laisser
+/// `index.json` lui-même à moitié écrit (et donc illisible, ce qui ferait
+/// croire à `lister` qu'il n'y a aucune histoire).
 fn ecrire_index(repertoire_sauvegardes: &Path, histoires: &[InfoHistoire]) -> std::io::Result<()> {
     let chemin_index = repertoire_sauvegardes.join(NOM_INDEX);
+    let chemin_temporaire = chemin_index.with_extension("json.tmp");
     let contenu = serde_json::to_string_pretty(histoires).expect("sérialisation de l'index");
-    std::fs::write(&chemin_index, contenu)
+    std::fs::write(&chemin_temporaire, contenu)?;
+    std::fs::rename(&chemin_temporaire, &chemin_index)
 }
 
 pub fn chemin_sauvegarde(repertoire_sauvegardes: &Path, id: &str) -> PathBuf {
@@ -126,6 +133,31 @@ mod tests {
         let id2 = generer_id("Elowen");
         assert_ne!(id1, id2, "même nom, deux appels : ids tout de même distincts");
         assert!(id1.starts_with("elowen-"));
+    }
+
+    /// Regression guard pour l'écriture atomique de l'index. Un arrêt brutal
+    /// en pleine écriture n'est pas simulable de façon fiable dans un test
+    /// unitaire : ce test vérifie seulement le chemin nominal (ajout puis
+    /// retrait) — `index.json` doit toujours être un JSON complet et lisible,
+    /// et le fichier `.tmp` intermédiaire ne doit pas subsister après le
+    /// renommage.
+    #[test]
+    fn index_reste_un_json_complet_apres_ajout_et_retrait() {
+        let repertoire = repertoire_temporaire("atomique");
+        ajouter(&repertoire, entree_test("elowen-abc123", "Elowen")).unwrap();
+        ajouter(&repertoire, entree_test("thorn-def456", "Thorn")).unwrap();
+        retirer(&repertoire, "elowen-abc123").unwrap();
+
+        let contenu = std::fs::read_to_string(repertoire.join("index.json")).unwrap();
+        let attendu: Vec<InfoHistoire> = serde_json::from_str(&contenu)
+            .expect("index.json doit être un JSON complet et valide");
+        assert_eq!(attendu.len(), 1);
+        assert_eq!(attendu[0].id, "thorn-def456");
+        assert!(
+            !repertoire.join("index.json.tmp").exists(),
+            "le .tmp doit avoir été renommé vers index.json"
+        );
+        let _ = std::fs::remove_dir_all(&repertoire);
     }
 
     #[test]
