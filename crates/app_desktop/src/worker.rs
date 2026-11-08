@@ -34,6 +34,10 @@ fn repertoire_donnees_app() -> PathBuf {
         .expect("appel de File.getAbsolutePath()")
         .l()
         .expect("getAbsolutePath() retourne une java.lang.String");
+    // `JString::from(chemin_jstring)` crée une valeur temporaire ; la lier
+    // avant d'appeler `get_string` (plutôt que de l'emboîter dans l'appel)
+    // évite que le compilateur la libère avant que `chemin_java_str`
+    // (qui l'emprunte via `JavaStr`) ne soit utilisée.
     let chemin_jstring = jni::objects::JString::from(chemin_jstring);
     let chemin_java_str = env
         .get_string(&chemin_jstring)
@@ -184,7 +188,7 @@ pub fn lancer(
     repertoire_sauvegardes: PathBuf,
     repertoire_modeles: PathBuf,
 ) {
-    loop {
+    'selection: loop {
         let histoires_existantes = histoires::lister(&repertoire_sauvegardes);
         let _ = tx.unbounded_send(MessageVersUi::ListeHistoires(histoires_existantes.clone()));
 
@@ -201,7 +205,17 @@ pub fn lancer(
                             let _ = tx.unbounded_send(MessageVersUi::TourEchoue(format!(
                                 "échec de lecture de la sauvegarde : {erreur:?}"
                             )));
-                            continue;
+                            // `continue` seul ne continuerait que la boucle
+                            // interne d'attente d'une sélection, sans
+                            // renvoyer `ListeHistoires` — contrairement à
+                            // tous les autres chemins d'erreur de `lancer()`
+                            // (taille, téléchargement, chargement du
+                            // modèle), qui `continue`nt la boucle externe et
+                            // renvoient donc naturellement la liste. Sans
+                            // `'selection`, l'UI resterait bloquée sur
+                            // l'écran d'erreur sans jamais revenir à la
+                            // sélection.
+                            continue 'selection;
                         }
                     }
                 }
