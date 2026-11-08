@@ -17,6 +17,7 @@ mod vues;
 mod worker;
 
 use dioxus::prelude::*;
+use domain::Vainqueur;
 use futures_util::StreamExt;
 use protocole::{MessageVersUi, MessageVersWorker, Vue};
 use vues::confirmation_telechargement::ConfirmationTelechargement;
@@ -147,18 +148,29 @@ fn App() -> Element {
                     narration_en_cours.write().push_str(&fragment);
                     faire_defiler_journal();
                 }
-                MessageVersUi::TourTermine { etat: nouvel_etat, resultat_narration, resume_mecanique, combat_termine } => {
+                MessageVersUi::TourTermine { etat: nouvel_etat, resultat_narration, resume_mecanique, vainqueur_combat, partie_terminee } => {
                     journal.write().push(resultat_narration);
                     for ligne in resume_mecanique {
                         journal.write().push(ligne);
                     }
+                    // Une victoire ou une fuite réussie ne termine plus la
+                    // partie (seule la mort le fait, voir `partie_terminee`
+                    // plus bas) — on l'annonce quand même dans le journal
+                    // avant de reprendre l'exploration, pour que ce ne soit
+                    // pas silencieux.
+                    if !partie_terminee {
+                        match vainqueur_combat {
+                            Some(Vainqueur::Joueur) => journal.write().push("Victoire ! Le gobelin est vaincu.".to_string()),
+                            Some(Vainqueur::Fuite) => journal.write().push("Tu as fui le combat.".to_string()),
+                            Some(Vainqueur::Ennemis) | None => {}
+                        }
+                    }
                     narration_en_cours.set(String::new());
                     tour_en_cours.set(false);
                     faire_defiler_journal();
-                    let vainqueur = nouvel_etat.combat_en_cours.as_ref().and_then(|c| c.vainqueur);
                     etat.set(Some(nouvel_etat));
-                    if combat_termine {
-                        vue.set(Vue::FinDePartie(vainqueur));
+                    if partie_terminee {
+                        vue.set(Vue::FinDePartie(vainqueur_combat));
                     }
                 }
                 MessageVersUi::TourEchoue(message) => {

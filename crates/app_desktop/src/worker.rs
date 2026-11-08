@@ -134,7 +134,7 @@ pub fn traiter_message(
 
             match resultat {
                 Ok(resultat) => {
-                    if resultat.combat_termine {
+                    if resultat.partie_terminee {
                         let _ = std::fs::remove_file(chemin_sauvegarde);
                     } else {
                         let _ = sauvegarder_partie(sauvegarde, etat_courant);
@@ -143,7 +143,8 @@ pub fn traiter_message(
                         etat: etat_courant.clone(),
                         resultat_narration: resultat.narration,
                         resume_mecanique: resultat.resume_mecanique,
-                        combat_termine: resultat.combat_termine,
+                        vainqueur_combat: resultat.vainqueur_combat,
+                        partie_terminee: resultat.partie_terminee,
                     });
                 }
                 Err(erreur) => {
@@ -388,7 +389,7 @@ mod tests {
             &mut |msg| messages_envoyes.push(msg),
         );
 
-        assert!(matches!(messages_envoyes.last(), Some(MessageVersUi::TourTermine { combat_termine: false, .. })));
+        assert!(matches!(messages_envoyes.last(), Some(MessageVersUi::TourTermine { partie_terminee: false, .. })));
 
         let _ = std::fs::remove_file(chemin);
     }

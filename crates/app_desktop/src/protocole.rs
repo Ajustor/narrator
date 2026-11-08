@@ -13,7 +13,7 @@ pub enum MessageVersUi {
     EtatInitial(Option<EtatPartie>),
     PartieCreee(EtatPartie),
     NarrationFragment(String),
-    TourTermine { etat: EtatPartie, resultat_narration: String, resume_mecanique: Vec<String>, combat_termine: bool },
+    TourTermine { etat: EtatPartie, resultat_narration: String, resume_mecanique: Vec<String>, vainqueur_combat: Option<Vainqueur>, partie_terminee: bool },
     TourEchoue(String),
     PartieReinitialisee,
     ProgressionTelechargement(f32),

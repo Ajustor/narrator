@@ -107,7 +107,16 @@ pub fn resoudre_action_joueur(
 pub struct ResultatTour {
     pub narration: String,
     pub resume_mecanique: Vec<String>,
-    pub combat_termine: bool,
+    /// `Some(vainqueur)` si un combat s'est conclu *pendant ce tour* —
+    /// quel que soit le vainqueur. Sert à afficher un message transitoire
+    /// ("Victoire !", "Tu as fui.", ...) ; ne signifie pas que la partie
+    /// est terminée, voir `partie_terminee`.
+    pub vainqueur_combat: Option<Vainqueur>,
+    /// `true` seulement si le joueur est mort (`vainqueur_combat ==
+    /// Some(Vainqueur::Ennemis)`) : seul cas qui termine réellement la
+    /// partie. Une victoire ou une fuite réussie remet `combat_en_cours`
+    /// à `None` et laisse la partie continuer en exploration.
+    pub partie_terminee: bool,
 }
 
 pub fn resoudre_action_ennemis(etat: &mut EtatPartie, de: &mut dyn GenerateurDe) -> Vec<String> {
@@ -298,10 +307,20 @@ impl JouerTour {
         condenser_si_necessaire(etat, narrateur);
         enregistrer_pnj_si_pertinent(etat, &narration, narrateur);
 
+        let vainqueur_combat = etat.combat_en_cours.as_ref().filter(|c| c.termine).and_then(|c| c.vainqueur);
+        let partie_terminee = vainqueur_combat == Some(Vainqueur::Ennemis);
+        if vainqueur_combat.is_some() && !partie_terminee {
+            // Victoire ou fuite réussie : le combat est fini mais
+            // l'aventure continue — on revient en exploration plutôt que
+            // de laisser un `Combat` terminé bloquer la partie.
+            etat.combat_en_cours = None;
+        }
+
         Ok(ResultatTour {
             narration,
             resume_mecanique: resume,
-            combat_termine: etat.combat_en_cours.as_ref().map(|c| c.termine).unwrap_or(false),
+            vainqueur_combat,
+            partie_terminee,
         })
     }
 }
@@ -498,15 +517,47 @@ mod tests {
     }
 
     #[test]
-    fn jouer_tour_joueur_tue_l_ennemi_et_termine_le_combat() {
+    fn jouer_tour_joueur_tue_l_ennemi_et_revient_en_exploration() {
         let mut etat = etat_en_combat();
         etat.combat_en_cours.as_mut().unwrap().ennemis[0].pv_actuels = 1;
         let mut narrateur = NarrateurDeTest { action: ActionJoueur::Attaquer { cible: "Gobelin".into() } };
         // attaque: d20=10 + mod_dex(14)=2 => 12 >= defense 12 (touché) ; dégâts d4=3 (mains nues, tue le gobelin à 1 pv)
         let mut de = GenerateurDeSeed::nouveau(vec![10, 3]);
         let resultat = JouerTour::executer(&mut etat, "j'attaque le gobelin", &mut narrateur, &mut de, &mut |_| {}).unwrap();
-        assert!(resultat.combat_termine);
-        assert_eq!(etat.combat_en_cours.as_ref().unwrap().vainqueur, Some(Vainqueur::Joueur));
+        assert_eq!(resultat.vainqueur_combat, Some(Vainqueur::Joueur));
+        assert!(!resultat.partie_terminee, "une victoire ne doit pas terminer la partie");
+        assert!(etat.combat_en_cours.is_none(), "le combat gagné doit laisser la place à l'exploration");
+    }
+
+    #[test]
+    fn jouer_tour_fuite_reussie_revient_en_exploration() {
+        let mut etat = etat_en_combat();
+        let mut narrateur = NarrateurDeTest { action: ActionJoueur::Fuir };
+        let mut de = GenerateurDeSeed::nouveau(vec![]);
+        let resultat = JouerTour::executer(&mut etat, "je fuis", &mut narrateur, &mut de, &mut |_| {}).unwrap();
+        assert_eq!(resultat.vainqueur_combat, Some(Vainqueur::Fuite));
+        assert!(!resultat.partie_terminee, "une fuite réussie ne doit pas terminer la partie");
+        assert!(etat.combat_en_cours.is_none(), "la fuite doit laisser la place à l'exploration");
+    }
+
+    #[test]
+    fn jouer_tour_mort_du_joueur_termine_reellement_la_partie() {
+        let mut etat = etat_en_combat();
+        etat.personnage.subir_degats(etat.personnage.pv_max); // 0 PV
+        let mut narrateur = NarrateurDeTest { action: ActionJoueur::ActionLibre("j'observe".into()) };
+        // ennemi_agit_avant_joueur est false (étape par défaut) : l'action
+        // libre du joueur ne consomme pas de dé, puis l'ennemi attaque
+        // (jet d'attaque + jet de dégâts) — déjà sans effet, le joueur
+        // étant déjà à 0 PV, mais `resoudre_action_ennemis` consomme ces
+        // deux dés avant même de vérifier la mort.
+        let mut de = GenerateurDeSeed::nouveau(vec![10, 4]);
+        let resultat = JouerTour::executer(&mut etat, "j'observe", &mut narrateur, &mut de, &mut |_| {}).unwrap();
+        assert_eq!(resultat.vainqueur_combat, Some(Vainqueur::Ennemis));
+        assert!(resultat.partie_terminee, "la mort du joueur doit terminer la partie");
+        assert!(
+            etat.combat_en_cours.is_some(),
+            "contrairement à une victoire/fuite, le combat perdu n'a pas besoin d'être nettoyé : la partie est finie"
+        );
     }
 
     #[test]
@@ -518,16 +569,17 @@ mod tests {
         let mut de = GenerateurDeSeed::nouveau(vec![10, 4]);
         let resultat = JouerTour::executer(&mut etat, "j'observe", &mut narrateur, &mut de, &mut |_| {}).unwrap();
         assert_eq!(etat.personnage.pv_actuels, etat.personnage.pv_max - 4);
-        assert!(!resultat.combat_termine);
+        assert_eq!(resultat.vainqueur_combat, None);
     }
 
     #[test]
-    fn jouer_tour_hors_combat_ne_signale_jamais_combat_termine() {
+    fn jouer_tour_hors_combat_ne_signale_jamais_de_vainqueur() {
         let mut etat = etat_sans_combat();
         let mut narrateur = NarrateurDeTest { action: ActionJoueur::ActionLibre("j'observe".into()) };
         let mut de = GenerateurDeSeed::nouveau(vec![]);
         let resultat = JouerTour::executer(&mut etat, "j'observe", &mut narrateur, &mut de, &mut |_| {}).unwrap();
-        assert!(!resultat.combat_termine);
+        assert_eq!(resultat.vainqueur_combat, None);
+        assert!(!resultat.partie_terminee);
     }
 
     #[test]

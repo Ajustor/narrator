@@ -69,15 +69,15 @@ fn main() {
                     println!("{}", ligne);
                 }
 
-                if resultat.combat_termine {
-                    let _ = std::fs::remove_file("partie.json");
+                match resultat.vainqueur_combat {
+                    Some(Vainqueur::Joueur) => println!("\nVictoire ! Le gobelin est vaincu."),
+                    Some(Vainqueur::Ennemis) => println!("\nTu es tombé au combat..."),
+                    Some(Vainqueur::Fuite) => println!("\nTu as fui le combat."),
+                    None => {}
+                }
 
-                    match etat.combat_en_cours.as_ref().and_then(|c| c.vainqueur) {
-                        Some(Vainqueur::Joueur) => println!("\nVictoire ! Le gobelin est vaincu."),
-                        Some(Vainqueur::Ennemis) => println!("\nTu es tombé au combat..."),
-                        Some(Vainqueur::Fuite) => println!("\nTu as fui le combat."),
-                        None => {}
-                    }
+                if resultat.partie_terminee {
+                    let _ = std::fs::remove_file("partie.json");
                     break;
                 }
 
