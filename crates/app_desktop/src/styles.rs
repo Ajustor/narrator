@@ -83,6 +83,12 @@ html, body {
     background-repeat: no-repeat;
 }
 
+.champ .avertissement {
+    color: var(--danger);
+    font-size: 0.8rem;
+    margin-top: 0.25rem;
+}
+
 .bouton-principal {
     background: var(--accent);
     color: var(--bg);

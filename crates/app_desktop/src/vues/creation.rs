@@ -1,6 +1,7 @@
 use application::usecases::creer_personnage::{CLASSES_VALIDES, VALEURS_STANDARD};
 use dioxus::prelude::*;
 
+use crate::modeles::PaletteModele;
 use crate::protocole::MessageVersWorker;
 
 const NOMS_CARACTERISTIQUES: [&str; 6] =
@@ -11,6 +12,7 @@ pub fn Creation(sur_creation: EventHandler<MessageVersWorker>) -> Element {
     let mut nom = use_signal(String::new);
     let mut classe = use_signal(|| CLASSES_VALIDES[0].to_string());
     let mut valeurs = use_signal(|| [0u32; 6]);
+    let mut palette = use_signal(|| PaletteModele::Equilibre);
 
     let valeurs_disponibles = move |index_a_exclure: usize| -> Vec<u32> {
         let deja_choisies: Vec<u32> = valeurs()
@@ -49,6 +51,27 @@ pub fn Creation(sur_creation: EventHandler<MessageVersWorker>) -> Element {
                         }
                     }
                 }
+                div { class: "champ",
+                    label { "Modèle : " }
+                    select {
+                        value: "{palette().nom_affiche()}",
+                        onchange: move |evt| {
+                            if let Some(p) = PaletteModele::TOUTES.iter().find(|p| p.nom_affiche() == evt.value()) {
+                                palette.set(*p);
+                            }
+                        },
+                        for p in PaletteModele::TOUTES.iter() {
+                            option {
+                                key: "{p.nom_affiche()}",
+                                value: "{p.nom_affiche()}",
+                                "{p.nom_affiche()} (~{crate::telechargement::formater_taille_go(p.taille_approx_octets())})"
+                            }
+                        }
+                    }
+                    if let Some(avertissement) = palette().avertissement() {
+                        p { class: "avertissement", "{avertissement}" }
+                    }
+                }
                 for (index, label) in NOMS_CARACTERISTIQUES.iter().enumerate() {
                     div { class: "champ",
                         label { "{label} : " }
@@ -74,6 +97,7 @@ pub fn Creation(sur_creation: EventHandler<MessageVersWorker>) -> Element {
                             nom: nom().trim().to_string(),
                             classe: classe(),
                             valeurs: valeurs(),
+                            palette_modele: palette(),
                         });
                     },
                     "Commencer l'aventure"
