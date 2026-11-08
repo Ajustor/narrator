@@ -1,10 +1,12 @@
 use dioxus::prelude::*;
 
+use crate::modeles::PaletteModele;
 use crate::protocole::MessageVersWorker;
 use crate::telechargement::formater_taille_go;
 
 #[component]
 pub fn ConfirmationTelechargement(
+    palette: PaletteModele,
     taille_octets: u64,
     sur_reponse: EventHandler<MessageVersWorker>,
 ) -> Element {
@@ -14,9 +16,9 @@ pub fn ConfirmationTelechargement(
             div { class: "carte",
                 h1 { "Télécharger le modèle" }
                 p {
-                    "Premier lancement : le modèle de narration ({taille}) doit être "
-                    "téléchargé avant de pouvoir jouer. Une connexion stable et "
-                    "l'espace de stockage correspondant sont nécessaires."
+                    "Télécharger le modèle {palette.nom_affiche()} ({taille}) ? "
+                    "Une connexion stable et l'espace de stockage correspondant "
+                    "sont nécessaires."
                 }
                 div { class: "actions-modale",
                     button {

@@ -27,6 +27,7 @@ use vues::creation::Creation;
 use vues::erreur_chargement::ErreurChargement;
 use vues::fin_de_partie::FinDePartie;
 use vues::jeu::Jeu;
+use vues::selection_histoire::SelectionHistoire;
 use vues::telechargement::Telechargement;
 
 type RxPartage =
@@ -67,16 +68,16 @@ thread_local! {
 }
 
 fn main() {
-    let chemin_modele = worker::chemin_modele_par_defaut();
-    let chemin_sauvegarde = worker::chemin_sauvegarde_par_defaut();
+    let repertoire_sauvegardes = worker::repertoire_sauvegardes_par_defaut();
+    let repertoire_modeles = worker::repertoire_modeles_par_defaut();
 
     let (tx_vers_worker, rx_vers_worker) = std::sync::mpsc::channel::<MessageVersWorker>();
     let (tx_vers_ui, rx_vers_ui) = futures_channel::mpsc::unbounded::<MessageVersUi>();
 
     std::thread::spawn({
-        let chemin_modele = chemin_modele.clone();
-        let chemin_sauvegarde = chemin_sauvegarde.clone();
-        move || worker::lancer(rx_vers_worker, tx_vers_ui, chemin_modele, chemin_sauvegarde)
+        let repertoire_sauvegardes = repertoire_sauvegardes.clone();
+        let repertoire_modeles = repertoire_modeles.clone();
+        move || worker::lancer(rx_vers_worker, tx_vers_ui, repertoire_sauvegardes, repertoire_modeles)
     });
 
     // `UnboundedReceiver<MessageVersUi>` n'a qu'un seul propriétaire et
@@ -117,12 +118,19 @@ fn App() -> Element {
             .with(|cell| cell.borrow_mut().take())
             .expect("rx_partage ne doit être pris qu'une seule fois, à la création d'App")
     });
-    let mut vue = use_signal(|| Vue::Creation);
+    let mut vue = use_signal(|| Vue::SelectionHistoire(Vec::new()));
     let mut etat = use_signal(|| None::<domain::EtatPartie>);
     let mut journal: Signal<Vec<String>> = use_signal(Vec::new);
     let mut narration_en_cours = use_signal(String::new);
     let mut tour_en_cours = use_signal(|| false);
-    let mut erreur_chargement_initiale = use_signal(|| true);
+    // Erreur de téléchargement/chargement survenue avant `Vue::Jeu`
+    // (sélection, création, téléchargement) — récupérable : `worker::lancer`
+    // revient toujours à la sélection juste après (nouveau `ListeHistoires`
+    // à suivre). Distinct de `Vue::ErreurChargement`, qui reste réservée au
+    // cas réellement fatal (le thread du worker est mort). Affichée par
+    // `SelectionHistoire` jusqu'à ce que l'utilisateur agisse à nouveau
+    // depuis cet écran.
+    let mut erreur_pre_jeu: Signal<Option<String>> = use_signal(|| None);
 
     use_future(move || {
         let rx_partage = rx_partage.clone();
@@ -133,14 +141,8 @@ fn App() -> Element {
             .expect("le récepteur ne doit être pris qu'une seule fois, par ce use_future");
         while let Some(message) = rx.next().await {
             match message {
-                MessageVersUi::EtatInitial(Some(e)) => {
-                    etat.set(Some(e));
-                    vue.set(Vue::Jeu);
-                    erreur_chargement_initiale.set(false);
-                }
-                MessageVersUi::EtatInitial(None) => {
-                    vue.set(Vue::Creation);
-                    erreur_chargement_initiale.set(false);
+                MessageVersUi::ListeHistoires(histoires) => {
+                    vue.set(Vue::SelectionHistoire(histoires));
                 }
                 MessageVersUi::PartieCreee(e) => {
                     etat.set(Some(e));
@@ -176,25 +178,29 @@ fn App() -> Element {
                     }
                 }
                 MessageVersUi::TourEchoue(message) => {
-                    if erreur_chargement_initiale() {
-                        vue.set(Vue::ErreurChargement(message));
-                    } else {
+                    // Avant Vue::Jeu (sélection, création, téléchargement,
+                    // chargement du modèle), un échec est récupérable :
+                    // `lancer()` revient à la sélection juste après (nouveau
+                    // ListeHistoires à suivre) — on affiche l'erreur sur
+                    // l'écran de sélection plutôt que sur un écran dédié qui
+                    // serait immédiatement remplacé. Pendant Vue::Jeu, un
+                    // échec de tour reste local au journal, comme avant.
+                    if matches!(vue(), Vue::Jeu) {
                         journal.write().push(format!("⚠ {}", message));
                         narration_en_cours.set(String::new());
                         tour_en_cours.set(false);
                         faire_defiler_journal();
+                    } else {
+                        erreur_pre_jeu.set(Some(message));
                     }
                 }
                 MessageVersUi::ProgressionTelechargement(progression) => {
-                    vue.set(Vue::Telechargement(progression));
+                    if let Vue::Telechargement { palette, .. } | Vue::ConfirmationTelechargement { palette, .. } = vue() {
+                        vue.set(Vue::Telechargement { palette, progression });
+                    }
                 }
-                MessageVersUi::ConfirmationTelechargementRequise(taille_octets) => {
-                    vue.set(Vue::ConfirmationTelechargement(taille_octets));
-                }
-                MessageVersUi::PartieReinitialisee => {
-                    etat.set(None);
-                    journal.set(Vec::new());
-                    vue.set(Vue::Creation);
+                MessageVersUi::ConfirmationTelechargementRequise { palette, taille_octets } => {
+                    vue.set(Vue::ConfirmationTelechargement { palette, taille_octets });
                 }
             }
         }
@@ -209,6 +215,20 @@ fn App() -> Element {
 
     let vue_active = match vue() {
         Vue::ErreurChargement(message) => rsx! { ErreurChargement { message } },
+        Vue::SelectionHistoire(histoires) => rsx! {
+            SelectionHistoire {
+                histoires,
+                erreur: erreur_pre_jeu(),
+                sur_reprendre: move |msg| {
+                    erreur_pre_jeu.set(None);
+                    let _ = tx.send(msg);
+                },
+                sur_nouvelle_histoire: move |_| {
+                    erreur_pre_jeu.set(None);
+                    vue.set(Vue::Creation);
+                },
+            }
+        },
         Vue::Creation => rsx! {
             Creation {
                 sur_creation: move |msg| { let _ = tx.send(msg); }
@@ -232,9 +252,10 @@ fn App() -> Element {
                 }
             }
         }
-        Vue::Telechargement(progression) => rsx! { Telechargement { progression } },
-        Vue::ConfirmationTelechargement(taille_octets) => rsx! {
+        Vue::Telechargement { palette, progression } => rsx! { Telechargement { palette, progression } },
+        Vue::ConfirmationTelechargement { palette, taille_octets } => rsx! {
             ConfirmationTelechargement {
+                palette,
                 taille_octets,
                 sur_reponse: move |msg| { let _ = tx.send(msg); }
             }
@@ -242,7 +263,7 @@ fn App() -> Element {
         Vue::FinDePartie(vainqueur) => rsx! {
             FinDePartie {
                 vainqueur,
-                sur_nouvelle_partie: move |_| { let _ = tx.send(MessageVersWorker::NouvellePartie); }
+                sur_nouvelle_partie: move |_| { let _ = tx.send(MessageVersWorker::RetourSelection); }
             }
         },
     };

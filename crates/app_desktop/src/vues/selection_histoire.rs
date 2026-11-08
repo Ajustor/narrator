@@ -6,6 +6,7 @@ use crate::protocole::MessageVersWorker;
 #[component]
 pub fn SelectionHistoire(
     histoires: Vec<InfoHistoire>,
+    erreur: Option<String>,
     sur_reprendre: EventHandler<MessageVersWorker>,
     sur_nouvelle_histoire: EventHandler<()>,
 ) -> Element {
@@ -13,6 +14,9 @@ pub fn SelectionHistoire(
         div { class: "ecran-centre",
             div { class: "carte",
                 h1 { "Tes histoires" }
+                if let Some(message) = erreur {
+                    p { class: "avertissement", "⚠ {message}" }
+                }
                 if histoires.is_empty() {
                     p { "Aucune histoire pour l'instant." }
                 } else {
