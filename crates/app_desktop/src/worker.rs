@@ -10,34 +10,21 @@ use std::path::Path;
 
 use crate::protocole::{MessageVersUi, MessageVersWorker};
 
-/// Chemin du fichier modèle selon la plateforme.
-///
-/// Desktop : inchangé, lu depuis la variable d'environnement
-/// `NARRATEUR_MODELE` — ce chemin pointe déjà vers un fichier existant
-/// (téléchargé par `scripts/jouer.sh`), donc `telechargement::faut_il_telecharger`
-/// retournera toujours `false` en usage normal sur desktop.
-///
-/// Android : pas de variable d'environnement équivalente. Le modèle est
-/// téléchargé dans le répertoire de stockage privé de l'app, obtenu via
-/// JNI (`Activity.getFilesDir()`) à travers les crates `ndk-context`/`jni` —
+/// Répertoire de stockage privé de l'app sur Android, obtenu via JNI
+/// (`Activity.getFilesDir()`) à travers les crates `ndk-context`/`jni` —
 /// c'est le mécanisme standard pour ce besoin dans l'écosystème Rust/Android,
 /// mais il est à vérifier contre le vrai comportement du contexte Android
 /// que `dioxus`/`tao` initialisent au démarrage de l'app : si
 /// `ndk_context::android_context()` panique ou si l'API `jni` résolue
 /// diffère de celle utilisée ci-dessous, adapter ce code en conséquence
 /// plutôt que forcer cette signature — le compilateur et le comportement
-/// réel sur appareil font autorité.
-#[cfg(feature = "plateforme-desktop")]
-pub fn chemin_modele_par_defaut() -> std::path::PathBuf {
-    let chemin_modele = std::env::var("NARRATEUR_MODELE").unwrap_or_else(|_| {
-        eprintln!("La variable d'environnement NARRATEUR_MODELE doit pointer vers un fichier .gguf.");
-        std::process::exit(1);
-    });
-    std::path::PathBuf::from(chemin_modele)
-}
-
+/// réel sur appareil font autorité. Partagé entre `chemin_modele_par_defaut`
+/// et `chemin_sauvegarde_par_defaut` : les deux fichiers vivent dans ce même
+/// répertoire, qui est le seul emplacement accessible en écriture sans
+/// permission particulière sur Android (contrairement au `cwd` relatif
+/// utilisé sur desktop, qui n'a pas d'équivalent garanti écrivable là-bas).
 #[cfg(feature = "plateforme-android")]
-pub fn chemin_modele_par_defaut() -> std::path::PathBuf {
+fn repertoire_donnees_app() -> std::path::PathBuf {
     let ctx = ndk_context::android_context();
     let vm = unsafe { jni::JavaVM::from_raw(ctx.vm().cast()) }
         .expect("JavaVM Android valide fournie par le contexte natif");
@@ -63,8 +50,52 @@ pub fn chemin_modele_par_defaut() -> std::path::PathBuf {
     let chemin_java_str = env
         .get_string(&chemin_jstring)
         .expect("conversion JString -> JavaStr");
-    let repertoire = std::path::PathBuf::from(chemin_java_str.to_str().expect("UTF-8 valide"));
-    repertoire.join("Qwen2.5-3B-Instruct-Q4_K_M.gguf")
+    std::path::PathBuf::from(chemin_java_str.to_str().expect("UTF-8 valide"))
+}
+
+/// Chemin du fichier modèle selon la plateforme.
+///
+/// Desktop : inchangé, lu depuis la variable d'environnement
+/// `NARRATEUR_MODELE` — ce chemin pointe déjà vers un fichier existant
+/// (téléchargé par `scripts/jouer.sh`), donc `telechargement::faut_il_telecharger`
+/// retournera toujours `false` en usage normal sur desktop.
+///
+/// Android : pas de variable d'environnement équivalente. Le modèle est
+/// téléchargé dans `repertoire_donnees_app()`.
+#[cfg(feature = "plateforme-desktop")]
+pub fn chemin_modele_par_defaut() -> std::path::PathBuf {
+    let chemin_modele = std::env::var("NARRATEUR_MODELE").unwrap_or_else(|_| {
+        eprintln!("La variable d'environnement NARRATEUR_MODELE doit pointer vers un fichier .gguf.");
+        std::process::exit(1);
+    });
+    std::path::PathBuf::from(chemin_modele)
+}
+
+#[cfg(feature = "plateforme-android")]
+pub fn chemin_modele_par_defaut() -> std::path::PathBuf {
+    repertoire_donnees_app().join("Qwen2.5-3B-Instruct-Q4_K_M.gguf")
+}
+
+/// Chemin du fichier de sauvegarde selon la plateforme.
+///
+/// Desktop : inchangé, `partie.json` relatif au répertoire courant du
+/// processus — déjà le comportement historique de l'app, repris tel quel.
+///
+/// Android : un chemin relatif ne pointe vers aucun répertoire garanti
+/// accessible en écriture (contrairement à desktop, où le `cwd` l'est
+/// généralement) — avant ce correctif, `sauvegarder_partie` échouait
+/// silencieusement à chaque tour (l'erreur est ignorée par
+/// `let _ = sauvegarder_partie(...)` dans `traiter_message`), donc la
+/// progression ne survivait jamais à un redémarrage de l'app. Utilise le
+/// même répertoire de données privées que le modèle.
+#[cfg(feature = "plateforme-desktop")]
+pub fn chemin_sauvegarde_par_defaut() -> std::path::PathBuf {
+    std::path::PathBuf::from("partie.json")
+}
+
+#[cfg(feature = "plateforme-android")]
+pub fn chemin_sauvegarde_par_defaut() -> std::path::PathBuf {
+    repertoire_donnees_app().join("partie.json")
 }
 
 pub fn traiter_message(

@@ -65,7 +65,7 @@ thread_local! {
 
 fn main() {
     let chemin_modele = worker::chemin_modele_par_defaut();
-    let chemin_sauvegarde = std::path::PathBuf::from("partie.json");
+    let chemin_sauvegarde = worker::chemin_sauvegarde_par_defaut();
 
     let (tx_vers_worker, rx_vers_worker) = std::sync::mpsc::channel::<MessageVersWorker>();
     let (tx_vers_ui, rx_vers_ui) = futures_channel::mpsc::unbounded::<MessageVersUi>();
