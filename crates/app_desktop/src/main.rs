@@ -145,6 +145,19 @@ fn App() -> Element {
                     vue.set(Vue::SelectionHistoire(histoires));
                 }
                 MessageVersUi::PartieCreee(e) => {
+                    // `PartieCreee` démarre une histoire (nouvelle ou
+                    // reprise) : le journal/la narration en cours/l'état
+                    // "tour en cours" appartiennent à l'histoire
+                    // précédemment affichée (s'il y en avait une) et ne
+                    // doivent pas survivre au changement d'histoire dans le
+                    // même processus — sans ce reset, l'écran de jeu de la
+                    // nouvelle histoire s'ouvrirait avec le journal entier
+                    // (y compris une éventuelle narration de mort) de la
+                    // précédente encore affiché au-dessus de son propre
+                    // contenu.
+                    journal.set(Vec::new());
+                    narration_en_cours.set(String::new());
+                    tour_en_cours.set(false);
                     etat.set(Some(e));
                     vue.set(Vue::Jeu);
                 }
