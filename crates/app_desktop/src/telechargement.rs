@@ -1,9 +1,6 @@
 use std::io::{Read, Write};
 use std::path::Path;
 
-pub const MODELE_URL: &str =
-    "https://huggingface.co/bartowski/Qwen2.5-3B-Instruct-GGUF/resolve/main/Qwen2.5-3B-Instruct-Q4_K_M.gguf";
-
 #[derive(Debug, PartialEq)]
 pub enum ErreurTelechargement {
     Reseau(String),
@@ -42,10 +39,11 @@ const DELAI_RESEAU: std::time::Duration = std::time::Duration::from_secs(30);
 /// rendus sont visuellement utiles, contre ~32 000 appels (un par bloc de
 /// 64 Kio) pour un fichier de 2 Gio.
 pub fn telecharger_modele(
+    palette: &crate::modeles::PaletteModele,
     chemin_destination: &Path,
     sur_progression: &mut dyn FnMut(f32),
 ) -> Result<(), ErreurTelechargement> {
-    telecharger_depuis(MODELE_URL, chemin_destination, sur_progression)
+    telecharger_depuis(palette.url(), chemin_destination, sur_progression)
 }
 
 /// Récupère la taille totale du modèle (en octets) sans le télécharger —
@@ -54,8 +52,8 @@ pub fn telecharger_modele(
 /// que sur le premier kilo-octet déclenche une réponse `206 Partial
 /// Content` dont l'en-tête `Content-Range: bytes 0-1023/<total>` donne la
 /// taille réelle, sans transférer le fichier complet.
-pub fn verifier_taille_modele() -> Result<u64, ErreurTelechargement> {
-    verifier_taille_depuis(MODELE_URL)
+pub fn verifier_taille_modele(palette: &crate::modeles::PaletteModele) -> Result<u64, ErreurTelechargement> {
+    verifier_taille_depuis(palette.url())
 }
 
 fn verifier_taille_depuis(url: &str) -> Result<u64, ErreurTelechargement> {

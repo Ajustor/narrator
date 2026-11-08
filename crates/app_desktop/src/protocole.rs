@@ -1,31 +1,35 @@
 use domain::{EtatPartie, Vainqueur};
 
+pub use crate::histoires::InfoHistoire;
+pub use crate::modeles::PaletteModele;
+
 #[derive(Debug, Clone)]
 pub enum MessageVersWorker {
-    CreerPersonnage { nom: String, classe: String, valeurs: [u32; 6] },
+    ReprendreHistoire(String),
+    CreerPersonnage { nom: String, classe: String, valeurs: [u32; 6], palette_modele: PaletteModele },
     JouerTour(String),
-    NouvellePartie,
+    RetourSelection,
     ConfirmerTelechargement(bool),
 }
 
 #[derive(Debug, Clone)]
 pub enum MessageVersUi {
-    EtatInitial(Option<EtatPartie>),
+    ListeHistoires(Vec<InfoHistoire>),
     PartieCreee(EtatPartie),
     NarrationFragment(String),
     TourTermine { etat: EtatPartie, resultat_narration: String, resume_mecanique: Vec<String>, vainqueur_combat: Option<Vainqueur>, partie_terminee: bool },
     TourEchoue(String),
-    PartieReinitialisee,
     ProgressionTelechargement(f32),
-    ConfirmationTelechargementRequise(u64),
+    ConfirmationTelechargementRequise { palette: PaletteModele, taille_octets: u64 },
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Vue {
+    SelectionHistoire(Vec<InfoHistoire>),
     Creation,
     Jeu,
     FinDePartie(Option<Vainqueur>),
     ErreurChargement(String),
-    Telechargement(f32),
-    ConfirmationTelechargement(u64),
+    Telechargement { palette: PaletteModele, progression: f32 },
+    ConfirmationTelechargement { palette: PaletteModele, taille_octets: u64 },
 }

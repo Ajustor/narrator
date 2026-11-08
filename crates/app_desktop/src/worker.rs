@@ -2,29 +2,21 @@ use application::ports::generateur_de::GenerateurDe;
 use application::ports::narrateur::Narrateur;
 use application::ports::sauvegarde::{ErreurSauvegarde, Sauvegarde};
 use application::usecases::commencer_combat::commencer_combat;
-use application::usecases::creer_personnage::creer_personnage;
+use application::usecases::creer_personnage::{creer_personnage, ErreurCreationPersonnage};
 use application::usecases::jouer_tour::JouerTour;
 use application::usecases::partie::{charger_partie, sauvegarder_partie};
 use domain::{De, Ennemi, EtatPartie};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
+use crate::histoires::{self, InfoHistoire};
 use crate::protocole::{MessageVersUi, MessageVersWorker};
 
-/// Répertoire de stockage privé de l'app sur Android, obtenu via JNI
-/// (`Activity.getFilesDir()`) à travers les crates `ndk-context`/`jni` —
-/// c'est le mécanisme standard pour ce besoin dans l'écosystème Rust/Android,
-/// mais il est à vérifier contre le vrai comportement du contexte Android
-/// que `dioxus`/`tao` initialisent au démarrage de l'app : si
-/// `ndk_context::android_context()` panique ou si l'API `jni` résolue
-/// diffère de celle utilisée ci-dessous, adapter ce code en conséquence
-/// plutôt que forcer cette signature — le compilateur et le comportement
-/// réel sur appareil font autorité. Partagé entre `chemin_modele_par_defaut`
-/// et `chemin_sauvegarde_par_defaut` : les deux fichiers vivent dans ce même
-/// répertoire, qui est le seul emplacement accessible en écriture sans
-/// permission particulière sur Android (contrairement au `cwd` relatif
-/// utilisé sur desktop, qui n'a pas d'équivalent garanti écrivable là-bas).
+/// Répertoire de stockage privé de l'app sur Android — inchangé depuis le
+/// portage Android (JNI `Activity.getFilesDir()`), voir le commentaire
+/// historique si besoin de le retoucher. Partagé entre les deux fonctions
+/// de répertoire ci-dessous.
 #[cfg(feature = "plateforme-android")]
-fn repertoire_donnees_app() -> std::path::PathBuf {
+fn repertoire_donnees_app() -> PathBuf {
     let ctx = ndk_context::android_context();
     let vm = unsafe { jni::JavaVM::from_raw(ctx.vm().cast()) }
         .expect("JavaVM Android valide fournie par le contexte natif");
@@ -42,60 +34,71 @@ fn repertoire_donnees_app() -> std::path::PathBuf {
         .expect("appel de File.getAbsolutePath()")
         .l()
         .expect("getAbsolutePath() retourne une java.lang.String");
-    // `JString::from(chemin_jstring)` crée une valeur temporaire ; la lier
-    // avant d'appeler `get_string` (plutôt que de l'emboîter dans l'appel)
-    // évite que le compilateur la libère avant que `chemin_java_str`
-    // (qui l'emprunte via `JavaStr`) ne soit utilisée.
     let chemin_jstring = jni::objects::JString::from(chemin_jstring);
     let chemin_java_str = env
         .get_string(&chemin_jstring)
         .expect("conversion JString -> JavaStr");
-    std::path::PathBuf::from(chemin_java_str.to_str().expect("UTF-8 valide"))
+    PathBuf::from(chemin_java_str.to_str().expect("UTF-8 valide"))
 }
 
-/// Chemin du fichier modèle selon la plateforme.
-///
-/// Desktop : inchangé, lu depuis la variable d'environnement
-/// `NARRATEUR_MODELE` — ce chemin pointe déjà vers un fichier existant
-/// (téléchargé par `scripts/jouer.sh`), donc `telechargement::faut_il_telecharger`
-/// retournera toujours `false` en usage normal sur desktop.
-///
-/// Android : pas de variable d'environnement équivalente. Le modèle est
-/// téléchargé dans `repertoire_donnees_app()`.
 #[cfg(feature = "plateforme-desktop")]
-pub fn chemin_modele_par_defaut() -> std::path::PathBuf {
-    let chemin_modele = std::env::var("NARRATEUR_MODELE").unwrap_or_else(|_| {
-        eprintln!("La variable d'environnement NARRATEUR_MODELE doit pointer vers un fichier .gguf.");
-        std::process::exit(1);
-    });
-    std::path::PathBuf::from(chemin_modele)
+pub fn repertoire_sauvegardes_par_defaut() -> PathBuf {
+    PathBuf::from("sauvegardes")
 }
 
 #[cfg(feature = "plateforme-android")]
-pub fn chemin_modele_par_defaut() -> std::path::PathBuf {
-    repertoire_donnees_app().join("Qwen2.5-3B-Instruct-Q4_K_M.gguf")
+pub fn repertoire_sauvegardes_par_defaut() -> PathBuf {
+    repertoire_donnees_app().join("sauvegardes")
 }
 
-/// Chemin du fichier de sauvegarde selon la plateforme.
-///
-/// Desktop : inchangé, `partie.json` relatif au répertoire courant du
-/// processus — déjà le comportement historique de l'app, repris tel quel.
-///
-/// Android : un chemin relatif ne pointe vers aucun répertoire garanti
-/// accessible en écriture (contrairement à desktop, où le `cwd` l'est
-/// généralement) — avant ce correctif, `sauvegarder_partie` échouait
-/// silencieusement à chaque tour (l'erreur est ignorée par
-/// `let _ = sauvegarder_partie(...)` dans `traiter_message`), donc la
-/// progression ne survivait jamais à un redémarrage de l'app. Utilise le
-/// même répertoire de données privées que le modèle.
 #[cfg(feature = "plateforme-desktop")]
-pub fn chemin_sauvegarde_par_defaut() -> std::path::PathBuf {
-    std::path::PathBuf::from("partie.json")
+pub fn repertoire_modeles_par_defaut() -> PathBuf {
+    PathBuf::from("modeles")
 }
 
 #[cfg(feature = "plateforme-android")]
-pub fn chemin_sauvegarde_par_defaut() -> std::path::PathBuf {
-    repertoire_donnees_app().join("partie.json")
+pub fn repertoire_modeles_par_defaut() -> PathBuf {
+    repertoire_donnees_app().join("modeles")
+}
+
+/// Construit l'état initial d'une nouvelle histoire (personnage + premier
+/// combat), sans rien écrire sur disque ni toucher à l'index — pure,
+/// testable isolément. `lancer()` s'occupe de la génération de l'id, de
+/// l'écriture de l'index et de la sauvegarde une fois le modèle chargé.
+pub fn creer_nouvelle_histoire(
+    nom: &str,
+    classe: &str,
+    valeurs: [u32; 6],
+    de: &mut dyn GenerateurDe,
+) -> Result<EtatPartie, ErreurCreationPersonnage> {
+    let personnage = creer_personnage(nom, classe, valeurs)?;
+    let gobelin = Ennemi::nouveau("Gobelin".to_string(), 7, De { faces: 6 }, 12, 2, 3);
+    let combat = commencer_combat(&personnage, vec![gobelin], de);
+    Ok(EtatPartie {
+        personnage,
+        lieu_actuel: "Clairière".to_string(),
+        combat_en_cours: Some(combat),
+        resumes: Vec::new(),
+        pnj_connus: Vec::new(),
+    })
+}
+
+/// Charge l'état d'une histoire existante depuis son fichier de
+/// sauvegarde. Séparé de `lancer()` pour rester testable isolément (Review
+/// Focus : fichier absent ou corrompu doit produire une erreur propre,
+/// pas une panique).
+fn charger_histoire_existante(chemin_sauvegarde: &Path) -> Result<EtatPartie, ErreurSauvegarde> {
+    let sauvegarde = infra::SauvegardeFichier::nouveau(chemin_sauvegarde.to_path_buf());
+    charger_partie(&sauvegarde)
+}
+
+/// Contexte d'une histoire en cours, regroupé pour ne pas faire exploser
+/// le nombre de paramètres de `traiter_message`.
+pub struct ContexteHistoire<'a> {
+    pub sauvegarde: &'a dyn Sauvegarde,
+    pub chemin_sauvegarde: &'a Path,
+    pub repertoire_sauvegardes: &'a Path,
+    pub id: &'a str,
 }
 
 pub fn traiter_message(
@@ -103,29 +106,10 @@ pub fn traiter_message(
     message: MessageVersWorker,
     narrateur: &mut dyn Narrateur,
     de: &mut dyn GenerateurDe,
-    sauvegarde: &dyn Sauvegarde,
-    chemin_sauvegarde: &Path,
+    contexte: &ContexteHistoire,
     sur_message_ui: &mut dyn FnMut(MessageVersUi),
 ) {
     match message {
-        MessageVersWorker::CreerPersonnage { nom, classe, valeurs } => {
-            let personnage = match creer_personnage(&nom, &classe, valeurs) {
-                Ok(personnage) => personnage,
-                Err(_) => return,
-            };
-            let gobelin = Ennemi::nouveau("Gobelin".to_string(), 7, De { faces: 6 }, 12, 2, 3);
-            let combat = commencer_combat(&personnage, vec![gobelin], de);
-            let nouvel_etat = EtatPartie {
-                personnage,
-                lieu_actuel: "Clairière".to_string(),
-                combat_en_cours: Some(combat),
-                resumes: Vec::new(),
-                pnj_connus: Vec::new(),
-            };
-            *etat = Some(nouvel_etat.clone());
-            sur_message_ui(MessageVersUi::PartieCreee(nouvel_etat));
-        }
-
         MessageVersWorker::JouerTour(saisie) => {
             let Some(etat_courant) = etat.as_mut() else { return };
             let resultat = JouerTour::executer(etat_courant, &saisie, narrateur, de, &mut |fragment: &str| {
@@ -135,9 +119,10 @@ pub fn traiter_message(
             match resultat {
                 Ok(resultat) => {
                     if resultat.partie_terminee {
-                        let _ = std::fs::remove_file(chemin_sauvegarde);
+                        let _ = std::fs::remove_file(contexte.chemin_sauvegarde);
+                        let _ = histoires::retirer(contexte.repertoire_sauvegardes, contexte.id);
                     } else {
-                        let _ = sauvegarder_partie(sauvegarde, etat_courant);
+                        let _ = sauvegarder_partie(contexte.sauvegarde, etat_courant);
                     }
                     sur_message_ui(MessageVersUi::TourTermine {
                         etat: etat_courant.clone(),
@@ -153,127 +138,193 @@ pub fn traiter_message(
             }
         }
 
-        MessageVersWorker::NouvellePartie => {
-            let _ = std::fs::remove_file(chemin_sauvegarde);
-            *etat = None;
-            sur_message_ui(MessageVersUi::PartieReinitialisee);
-        }
-
-        // Ce message n'est en réalité jamais remis à `traiter_message` : il
-        // est consommé directement dans `lancer()`, avant que la boucle qui
-        // appelle `traiter_message` ne démarre (voir plus bas). L'exhaustivité
-        // du `match` impose néanmoins ce bras.
-        MessageVersWorker::ConfirmerTelechargement(_) => {}
+        // Ces messages n'atteignent jamais `traiter_message` en pratique :
+        // `ReprendreHistoire`/`CreerPersonnage` sont consommés par la
+        // boucle externe de `lancer()` avant qu'une histoire soit
+        // chargée ; `RetourSelection` par `jouer_histoire` ; et
+        // `ConfirmerTelechargement` par `lancer()` pendant le
+        // téléchargement. L'exhaustivité du `match` impose ces bras.
+        MessageVersWorker::ReprendreHistoire(_)
+        | MessageVersWorker::CreerPersonnage { .. }
+        | MessageVersWorker::RetourSelection
+        | MessageVersWorker::ConfirmerTelechargement(_) => {}
     }
 }
 
-pub fn charger_etat_initial(sauvegarde: &dyn Sauvegarde) -> Option<EtatPartie> {
-    match charger_partie(sauvegarde) {
-        Ok(etat) => Some(etat),
-        Err(ErreurSauvegarde::FichierAbsent) => None,
-        Err(_) => None,
+pub enum ActionApresHistoire {
+    RetourSelection,
+    CanalFerme,
+}
+
+/// Traite les tours d'une histoire déjà chargée jusqu'à un retour
+/// explicite à la sélection (`RetourSelection`, envoyé par le bouton
+/// "Nouvelle partie" de l'écran de fin) ou la fermeture du canal.
+fn jouer_histoire(
+    rx: &std::sync::mpsc::Receiver<MessageVersWorker>,
+    tx: &futures_channel::mpsc::UnboundedSender<MessageVersUi>,
+    etat: &mut Option<EtatPartie>,
+    narrateur: &mut dyn Narrateur,
+    de: &mut dyn GenerateurDe,
+    contexte: &ContexteHistoire,
+) -> ActionApresHistoire {
+    loop {
+        match rx.recv() {
+            Ok(MessageVersWorker::RetourSelection) => return ActionApresHistoire::RetourSelection,
+            Ok(message) => traiter_message(etat, message, narrateur, de, contexte, &mut |msg| {
+                let _ = tx.unbounded_send(msg);
+            }),
+            Err(_) => return ActionApresHistoire::CanalFerme,
+        }
     }
 }
 
 pub fn lancer(
     rx: std::sync::mpsc::Receiver<MessageVersWorker>,
     tx: futures_channel::mpsc::UnboundedSender<MessageVersUi>,
-    chemin_modele: std::path::PathBuf,
-    chemin_sauvegarde: std::path::PathBuf,
+    repertoire_sauvegardes: PathBuf,
+    repertoire_modeles: PathBuf,
 ) {
-    if crate::telechargement::faut_il_telecharger(&chemin_modele) {
-        // Trace explicite : sur desktop, un `NARRATEUR_MODELE` mal
-        // orthographié déclencherait sinon un téléchargement silencieux de
-        // ~2 Gio au lieu de l'échec rapide d'avant, sans que rien n'indique
-        // pourquoi l'application reste bloquée plusieurs minutes.
-        eprintln!(
-            "modèle absent à {}, vérification de sa taille avant de demander confirmation (source : {})",
-            chemin_modele.display(),
-            crate::telechargement::MODELE_URL
-        );
+    loop {
+        let histoires_existantes = histoires::lister(&repertoire_sauvegardes);
+        let _ = tx.unbounded_send(MessageVersUi::ListeHistoires(histoires_existantes.clone()));
 
-        let taille_octets = match crate::telechargement::verifier_taille_modele() {
-            Ok(taille) => taille,
-            Err(erreur) => {
-                let _ = tx.unbounded_send(MessageVersUi::TourEchoue(format!(
-                    "échec de la vérification du modèle à télécharger : {erreur:?}"
-                )));
-                return;
-            }
-        };
-
-        let _ = tx.unbounded_send(MessageVersUi::ConfirmationTelechargementRequise(taille_octets));
-
-        // Bloque jusqu'à la réponse de l'utilisateur. Aucun autre message ne
-        // peut légitimement arriver ici : l'interface est sur l'écran de
-        // confirmation, dont les deux seuls boutons envoient
-        // `ConfirmerTelechargement` — on ignore donc tout le reste sans le
-        // perdre (plutôt qu'un `match` qui paniquerait dessus).
-        let confirme = loop {
+        let (id, info, etat_initial, deja_enregistree) = loop {
             match rx.recv() {
-                Ok(MessageVersWorker::ConfirmerTelechargement(reponse)) => break reponse,
+                Ok(MessageVersWorker::ReprendreHistoire(id_choisie)) => {
+                    let Some(info) = histoires_existantes.iter().find(|h| h.id == id_choisie).cloned() else {
+                        continue; // id inconnu : on ignore, l'UI reste sur la liste déjà envoyée
+                    };
+                    let chemin = histoires::chemin_sauvegarde(&repertoire_sauvegardes, &id_choisie);
+                    match charger_histoire_existante(&chemin) {
+                        Ok(etat) => break (id_choisie, info, etat, true),
+                        Err(erreur) => {
+                            let _ = tx.unbounded_send(MessageVersUi::TourEchoue(format!(
+                                "échec de lecture de la sauvegarde : {erreur:?}"
+                            )));
+                            continue;
+                        }
+                    }
+                }
+                Ok(MessageVersWorker::CreerPersonnage { nom, classe, valeurs, palette_modele }) => {
+                    let mut de_creation = infra::GenerateurDeOs;
+                    let Ok(etat) = creer_nouvelle_histoire(&nom, &classe, valeurs, &mut de_creation) else {
+                        continue; // formulaire invalide : ne devrait pas arriver, la Création valide déjà
+                    };
+                    let nouvel_id = histoires::generer_id(&nom);
+                    let info = InfoHistoire {
+                        id: nouvel_id.clone(),
+                        nom_personnage: nom,
+                        classe,
+                        palette_modele,
+                        cree_le: std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_nanos())
+                            .unwrap_or(0),
+                    };
+                    break (nouvel_id, info, etat, false);
+                }
                 Ok(_) => continue,
                 Err(_) => return,
             }
         };
 
-        if !confirme {
-            let _ = tx.unbounded_send(MessageVersUi::TourEchoue(
-                "téléchargement annulé — relance l'application pour réessayer".to_string(),
-            ));
-            return;
+        let chemin_modele = info.palette_modele.chemin_dans(&repertoire_modeles);
+
+        if crate::telechargement::faut_il_telecharger(&chemin_modele) {
+            let taille_octets = match crate::telechargement::verifier_taille_modele(&info.palette_modele) {
+                Ok(taille) => taille,
+                Err(erreur) => {
+                    let _ = tx.unbounded_send(MessageVersUi::TourEchoue(format!(
+                        "échec de la vérification du modèle à télécharger : {erreur:?}"
+                    )));
+                    continue;
+                }
+            };
+
+            let _ = tx.unbounded_send(MessageVersUi::ConfirmationTelechargementRequise {
+                palette: info.palette_modele,
+                taille_octets,
+            });
+
+            let confirme = loop {
+                match rx.recv() {
+                    Ok(MessageVersWorker::ConfirmerTelechargement(reponse)) => break reponse,
+                    Ok(_) => continue,
+                    Err(_) => return,
+                }
+            };
+
+            if !confirme {
+                continue; // retour à la sélection — annulation volontaire, pas une erreur
+            }
+
+            let resultat = crate::telechargement::telecharger_modele(&info.palette_modele, &chemin_modele, &mut |progression| {
+                let _ = tx.unbounded_send(MessageVersUi::ProgressionTelechargement(progression));
+            });
+            if let Err(erreur) = resultat {
+                let _ = tx.unbounded_send(MessageVersUi::TourEchoue(format!(
+                    "échec du téléchargement du modèle : {erreur:?}"
+                )));
+                continue;
+            }
         }
 
-        let resultat = crate::telechargement::telecharger_modele(&chemin_modele, &mut |progression| {
-            let _ = tx.unbounded_send(MessageVersUi::ProgressionTelechargement(progression));
-        });
-        if let Err(erreur) = resultat {
-            let _ = tx.unbounded_send(MessageVersUi::TourEchoue(format!(
-                "échec du téléchargement du modèle : {erreur:?}"
-            )));
-            return;
+        let mut narrateur = match infra::LlamaNarrateur::charger(&chemin_modele) {
+            Ok(narrateur) => narrateur,
+            Err(erreur) => {
+                let _ = tx.unbounded_send(MessageVersUi::TourEchoue(format!(
+                    "échec du chargement du modèle : {erreur}"
+                )));
+                continue;
+            }
+        };
+        let mut de = infra::GenerateurDeOs;
+        let chemin_sauvegarde_histoire = histoires::chemin_sauvegarde(&repertoire_sauvegardes, &id);
+        let sauvegarde = infra::SauvegardeFichier::nouveau(chemin_sauvegarde_histoire.clone());
+
+        // Nouvelle histoire seulement : l'enregistrer maintenant que le
+        // modèle a réellement chargé — pas avant, pour ne jamais laisser
+        // une entrée fantôme dans l'index si le chargement échoue ou si
+        // l'utilisateur annule le téléchargement.
+        if !deja_enregistree {
+            let _ = histoires::ajouter(&repertoire_sauvegardes, info.clone());
+            let _ = sauvegarder_partie(&sauvegarde, &etat_initial);
         }
-    }
 
-    let mut narrateur = match infra::LlamaNarrateur::charger(&chemin_modele) {
-        Ok(narrateur) => narrateur,
-        Err(erreur) => {
-            let _ = tx.unbounded_send(MessageVersUi::TourEchoue(format!(
-                "échec du chargement du modèle : {erreur}"
-            )));
-            return;
+        let _ = tx.unbounded_send(MessageVersUi::PartieCreee(etat_initial.clone()));
+
+        let contexte = ContexteHistoire {
+            sauvegarde: &sauvegarde,
+            chemin_sauvegarde: &chemin_sauvegarde_histoire,
+            repertoire_sauvegardes: &repertoire_sauvegardes,
+            id: &id,
+        };
+        let mut etat = Some(etat_initial);
+        match jouer_histoire(&rx, &tx, &mut etat, &mut narrateur, &mut de, &contexte) {
+            ActionApresHistoire::RetourSelection => continue,
+            ActionApresHistoire::CanalFerme => return,
         }
-    };
-    let mut de = infra::GenerateurDeOs;
-    let sauvegarde = infra::SauvegardeFichier::nouveau(chemin_sauvegarde.clone());
-
-    let mut etat = charger_etat_initial(&sauvegarde);
-    let _ = tx.unbounded_send(MessageVersUi::EtatInitial(etat.clone()));
-
-    while let Ok(message) = rx.recv() {
-        traiter_message(
-            &mut etat,
-            message,
-            &mut narrateur,
-            &mut de,
-            &sauvegarde,
-            &chemin_sauvegarde,
-            &mut |msg| {
-                let _ = tx.unbounded_send(msg);
-            },
-        );
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use infra::FauxNarrateur;
     use infra::SauvegardeFichier;
     use std::path::PathBuf;
 
     fn chemin_temporaire(nom: &str) -> PathBuf {
         std::env::temp_dir().join(format!("app_desktop_test_{}_{}.json", std::process::id(), nom))
+    }
+
+    fn repertoire_temporaire(nom: &str) -> PathBuf {
+        let chemin = std::env::temp_dir().join(format!(
+            "app_desktop_worker_test_{}_{}",
+            std::process::id(),
+            nom
+        ));
+        let _ = std::fs::remove_dir_all(&chemin);
+        chemin
     }
 
     struct GenerateurDeFixe;
@@ -285,33 +336,28 @@ mod tests {
     }
 
     #[test]
-    fn creer_personnage_envoie_partie_creee() {
-        let chemin = chemin_temporaire("creer");
-        let sauvegarde = SauvegardeFichier::nouveau(chemin.clone());
-        let mut etat: Option<EtatPartie> = None;
-        let mut narrateur = FauxNarrateur;
+    fn creer_nouvelle_histoire_construit_un_personnage_en_combat() {
         let mut de = GenerateurDeFixe;
-        let mut messages_envoyes = Vec::new();
+        let etat = creer_nouvelle_histoire("Elowen", "Guerrier", [15, 14, 13, 12, 10, 8], &mut de).unwrap();
+        assert_eq!(etat.personnage.nom, "Elowen");
+        assert!(etat.combat_en_cours.is_some());
+    }
 
-        traiter_message(
-            &mut etat,
-            MessageVersWorker::CreerPersonnage {
-                nom: "Elowen".to_string(),
-                classe: "Guerrier".to_string(),
-                valeurs: [15, 14, 13, 12, 10, 8],
-            },
-            &mut narrateur,
-            &mut de,
-            &sauvegarde,
-            &chemin,
-            &mut |msg| messages_envoyes.push(msg),
-        );
+    /// Review Focus : reprendre une histoire dont le fichier est absent ou
+    /// corrompu doit produire une erreur propre, pas une panique.
+    #[test]
+    fn charger_histoire_existante_echoue_proprement_si_fichier_absent() {
+        let chemin = chemin_temporaire("absent");
+        let _ = std::fs::remove_file(&chemin);
+        assert!(charger_histoire_existante(&chemin).is_err());
+    }
 
-        assert!(etat.is_some());
-        assert_eq!(etat.as_ref().unwrap().personnage.nom, "Elowen");
-        assert!(matches!(messages_envoyes.last(), Some(MessageVersUi::PartieCreee(_))));
-
-        let _ = std::fs::remove_file(chemin);
+    #[test]
+    fn charger_histoire_existante_echoue_proprement_si_json_invalide() {
+        let chemin = chemin_temporaire("corrompu");
+        std::fs::write(&chemin, "ceci n'est pas du json valide").unwrap();
+        assert!(charger_histoire_existante(&chemin).is_err());
+        let _ = std::fs::remove_file(&chemin);
     }
 
     struct NarrateurTourReussi;
@@ -373,19 +419,25 @@ mod tests {
     #[test]
     fn jouer_tour_hors_combat_envoie_fragments_puis_tour_termine() {
         let chemin = chemin_temporaire("tour_reussi");
+        let repertoire = repertoire_temporaire("tour_reussi");
         let sauvegarde = SauvegardeFichier::nouveau(chemin.clone());
         let mut etat: Option<EtatPartie> = Some(etat_sans_combat());
         let mut narrateur = NarrateurTourReussi;
         let mut de = GenerateurDeFixe;
         let mut messages_envoyes = Vec::new();
+        let contexte = ContexteHistoire {
+            sauvegarde: &sauvegarde,
+            chemin_sauvegarde: &chemin,
+            repertoire_sauvegardes: &repertoire,
+            id: "elowen-test",
+        };
 
         traiter_message(
             &mut etat,
             MessageVersWorker::JouerTour("j'observe".to_string()),
             &mut narrateur,
             &mut de,
-            &sauvegarde,
-            &chemin,
+            &contexte,
             &mut |msg| messages_envoyes.push(msg),
         );
 
@@ -431,19 +483,25 @@ mod tests {
     #[test]
     fn attaquer_sans_combat_envoie_tour_echoue() {
         let chemin = chemin_temporaire("tour_echec");
+        let repertoire = repertoire_temporaire("tour_echec");
         let sauvegarde = SauvegardeFichier::nouveau(chemin.clone());
         let mut etat: Option<EtatPartie> = Some(etat_sans_combat());
         let mut narrateur = NarrateurTourEnEchec;
         let mut de = GenerateurDeFixe;
         let mut messages_envoyes = Vec::new();
+        let contexte = ContexteHistoire {
+            sauvegarde: &sauvegarde,
+            chemin_sauvegarde: &chemin,
+            repertoire_sauvegardes: &repertoire,
+            id: "elowen-test",
+        };
 
         traiter_message(
             &mut etat,
             MessageVersWorker::JouerTour("j'attaque".to_string()),
             &mut narrateur,
             &mut de,
-            &sauvegarde,
-            &chemin,
+            &contexte,
             &mut |msg| messages_envoyes.push(msg),
         );
 
@@ -452,28 +510,127 @@ mod tests {
         let _ = std::fs::remove_file(chemin);
     }
 
+    struct NarrateurMort;
+
+    impl Narrateur for NarrateurMort {
+        fn proposer_action(
+            &mut self,
+            _contexte: &application::ports::narrateur::ContexteTour,
+        ) -> Result<domain::ActionJoueur, application::ports::narrateur::ErreurNarrateur> {
+            Ok(domain::ActionJoueur::ActionLibre("j'observe".into()))
+        }
+
+        fn raconter_resultat(
+            &mut self,
+            _contexte: &application::ports::narrateur::ContexteResultat,
+            _sur_fragment: &mut dyn FnMut(&str),
+        ) -> Result<String, application::ports::narrateur::ErreurNarrateur> {
+            Ok(String::new())
+        }
+
+        fn condenser_resumes(
+            &mut self,
+            _anciens: &[String],
+        ) -> Result<String, application::ports::narrateur::ErreurNarrateur> {
+            Ok(String::new())
+        }
+
+        fn detecter_pnj(
+            &mut self,
+            _narration: &str,
+            _noms_connus: &[String],
+        ) -> Result<Option<application::ports::narrateur::PnjDetecte>, application::ports::narrateur::ErreurNarrateur> {
+            Ok(None)
+        }
+    }
+
+    /// Review Focus : la mort du personnage retire son histoire de
+    /// l'index ET son fichier, sans toucher à une AUTRE histoire présente.
     #[test]
-    fn nouvelle_partie_reinitialise_l_etat_et_supprime_la_sauvegarde() {
-        let chemin = chemin_temporaire("nouvelle_partie");
-        std::fs::write(&chemin, "contenu factice").expect("écriture échouée");
+    fn mort_du_joueur_retire_son_histoire_sans_toucher_aux_autres() {
+        let repertoire = repertoire_temporaire("mort");
+        let chemin = histoires::chemin_sauvegarde(&repertoire, "elowen-test");
+        std::fs::create_dir_all(&repertoire).unwrap();
+        std::fs::write(&chemin, "contenu factice").unwrap();
+        histoires::ajouter(&repertoire, InfoHistoire {
+            id: "elowen-test".to_string(),
+            nom_personnage: "Elowen".to_string(),
+            classe: "Guerrier".to_string(),
+            palette_modele: crate::modeles::PaletteModele::Equilibre,
+            cree_le: 1,
+        }).unwrap();
+        histoires::ajouter(&repertoire, InfoHistoire {
+            id: "thorn-autre".to_string(),
+            nom_personnage: "Thorn".to_string(),
+            classe: "Voleur".to_string(),
+            palette_modele: crate::modeles::PaletteModele::Leger,
+            cree_le: 2,
+        }).unwrap();
+
         let sauvegarde = SauvegardeFichier::nouveau(chemin.clone());
-        let mut etat: Option<EtatPartie> = Some(etat_sans_combat());
-        let mut narrateur = FauxNarrateur;
-        let mut de = GenerateurDeFixe;
+        let mut etat_en_combat = etat_sans_combat();
+        etat_en_combat.combat_en_cours = Some(domain::Combat {
+            ennemis: vec![domain::Ennemi::nouveau("Gobelin".into(), 7, domain::De { faces: 6 }, 12, 2, 3)],
+            ennemi_agit_avant_joueur: false,
+            tour_actuel: 0,
+            termine: false,
+            vainqueur: None,
+        });
+        etat_en_combat.personnage.subir_degats(etat_en_combat.personnage.pv_max);
+        let mut etat: Option<EtatPartie> = Some(etat_en_combat);
+        let mut narrateur = NarrateurMort;
+        let mut de = GenerateurDeSeedLocal::nouveau(vec![10, 4]);
         let mut messages_envoyes = Vec::new();
+        let contexte = ContexteHistoire {
+            sauvegarde: &sauvegarde,
+            chemin_sauvegarde: &chemin,
+            repertoire_sauvegardes: &repertoire,
+            id: "elowen-test",
+        };
 
         traiter_message(
             &mut etat,
-            MessageVersWorker::NouvellePartie,
+            MessageVersWorker::JouerTour("j'observe".to_string()),
             &mut narrateur,
             &mut de,
-            &sauvegarde,
-            &chemin,
+            &contexte,
             &mut |msg| messages_envoyes.push(msg),
         );
 
-        assert!(etat.is_none());
-        assert!(!chemin.exists());
-        assert!(matches!(messages_envoyes.last(), Some(MessageVersUi::PartieReinitialisee)));
+        assert!(matches!(messages_envoyes.last(), Some(MessageVersUi::TourTermine { partie_terminee: true, .. })));
+        assert!(!chemin.exists(), "le fichier de l'histoire morte doit être supprimé");
+        let histoires_restantes = histoires::lister(&repertoire);
+        assert_eq!(histoires_restantes.len(), 1);
+        assert_eq!(histoires_restantes[0].id, "thorn-autre", "l'autre histoire doit survivre");
+
+        let _ = std::fs::remove_dir_all(&repertoire);
+    }
+
+    struct GenerateurDeSeedLocal {
+        valeurs: std::collections::VecDeque<u32>,
+    }
+
+    impl GenerateurDeSeedLocal {
+        fn nouveau(valeurs: Vec<u32>) -> Self {
+            Self { valeurs: valeurs.into() }
+        }
+    }
+
+    impl GenerateurDe for GenerateurDeSeedLocal {
+        fn lancer(&mut self, _de: De, modificateur: i32) -> domain::JetDe {
+            let brut = self.valeurs.pop_front().expect("plus de valeurs de dé");
+            domain::JetDe::nouveau(brut, modificateur)
+        }
+    }
+
+    /// Review Focus : deux histoires différentes choisissant le même
+    /// palier doivent résoudre vers le même fichier de modèle partagé.
+    #[test]
+    fn deux_histoires_meme_palette_partagent_le_meme_chemin_modele() {
+        use crate::modeles::PaletteModele;
+        let repertoire_modeles = PathBuf::from("modeles");
+        let chemin1 = PaletteModele::Equilibre.chemin_dans(&repertoire_modeles);
+        let chemin2 = PaletteModele::Equilibre.chemin_dans(&repertoire_modeles);
+        assert_eq!(chemin1, chemin2);
     }
 }
