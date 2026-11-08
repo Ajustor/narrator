@@ -10,6 +10,7 @@ compile_error!("les features plateforme-desktop et plateforme-android sont mutue
 #[cfg(not(any(feature = "plateforme-desktop", feature = "plateforme-android")))]
 compile_error!("une feature de plateforme (plateforme-desktop ou plateforme-android) doit être activée");
 
+mod histoires;
 mod modeles;
 mod protocole;
 mod styles;
