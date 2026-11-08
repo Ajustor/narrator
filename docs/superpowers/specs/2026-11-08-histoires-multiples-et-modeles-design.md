@@ -65,6 +65,14 @@ Aujourd'hui, `worker::lancer()` charge **un** modèle fixe avant même de savoir
 
 Conséquence à vérifier à l'implémentation (pas une inconnue bloquante, un point à confirmer empiriquement comme les précédentes incertitudes Dioxus/llama.cpp de ce projet) : le worker doit pouvoir charger un modèle, terminer une histoire, puis en charger un **autre** (palier différent) dans le même processus — pas de changement à chaud en cours de partie, juste un chargement séquentiel. `LlamaNarrateur` doit pouvoir être abandonné (`Drop`) puis reconstruit normalement ; rien dans son code actuel ne laisse penser le contraire, mais ça n'a jamais été exercé deux fois dans le même processus jusqu'ici.
 
+## Récupération sur échec de téléchargement/chargement (décision explicite)
+
+Aujourd'hui, `lancer()` traite tout échec (téléchargement refusé/échoué, `LlamaNarrateur::charger` qui échoue) comme fatal : il envoie `TourEchoue`/une erreur puis `return`, ce qui termine le thread de jeu pour le reste du processus — l'app reste figée sur l'écran d'erreur jusqu'à relancer. Avec une seule histoire/un seul modèle possibles, « relancer pour réessayer » était un prix tolérable.
+
+**Décision : ce n'est plus acceptable une fois le choix de modèle par histoire en place.** Si un téléchargement échoue (ex. palier « Costaud » sur une connexion mobile qui lâche), l'app doit revenir à `Vue::SelectionHistoire` plutôt que de figer complètement — l'intérêt même du choix par histoire est de pouvoir se rabattre sur une histoire ou un modèle plus léger après un échec, pas de devoir relancer l'app à chaque fois.
+
+Conséquence pour l'implémentation : les branches d'erreur de `lancer()` (téléchargement refusé, échec réseau, échec de chargement du modèle) ne doivent plus `return` et terminer le thread — elles doivent revenir à l'étape 1 de la séquence ci-dessus (relire `index.json`, renvoyer `ListeHistoires` à l'interface) plutôt que de mourir. Concrètement, ça veut dire structurer `lancer()` autour d'une boucle externe (sélection → tentative de chargement → soit `Vue::Jeu` en cas de succès, soit retour à la sélection avec un message d'erreur affiché en cas d'échec) plutôt que du déroulé linéaire actuel. Le message d'erreur doit rester visible le temps que l'utilisateur en prenne connaissance (par exemple affiché sur l'écran de sélection lui-même, ou via un aller-retour par l'actuel `Vue::ErreurChargement` avant de revenir à la sélection) — le détail exact reste au choix du développeur.
+
 ## Fichiers
 
 Nouveaux (`crates/app_desktop/src/`) :
