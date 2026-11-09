@@ -144,6 +144,9 @@ fn App() -> Element {
                 MessageVersUi::ListeHistoires(histoires) => {
                     vue.set(Vue::SelectionHistoire(histoires));
                 }
+                MessageVersUi::ValeursProposees(valeurs) => {
+                    vue.set(Vue::Creation(valeurs));
+                }
                 MessageVersUi::PartieCreee(e) => {
                     // `PartieCreee` démarre une histoire (nouvelle ou
                     // reprise) : le journal/la narration en cours/l'état
@@ -155,7 +158,16 @@ fn App() -> Element {
                     // (y compris une éventuelle narration de mort) de la
                     // précédente encore affiché au-dessus de son propre
                     // contenu.
-                    journal.set(Vec::new());
+                    //
+                    // Pour une histoire REPRISE, `e.resumes` contient déjà
+                    // la narration des tours précédents (en clair pour les
+                    // plus récents, condensée pour les plus anciens — voir
+                    // `condenser_si_necessaire` dans `application`) : on
+                    // l'utilise pour réamorcer le journal plutôt que de
+                    // partir d'un écran vide sans aucun historique. Pour une
+                    // NOUVELLE histoire, `resumes` est vide, donc ce reste
+                    // équivalent à l'ancien `Vec::new()`.
+                    journal.set(e.resumes.clone());
                     narration_en_cours.set(String::new());
                     tour_en_cours.set(false);
                     etat.set(Some(e));
@@ -163,6 +175,13 @@ fn App() -> Element {
                 }
                 MessageVersUi::NarrationFragment(fragment) => {
                     narration_en_cours.write().push_str(&fragment);
+                    faire_defiler_journal();
+                }
+                MessageVersUi::IntroductionRacontee(texte) => {
+                    if !texte.is_empty() {
+                        journal.write().push(texte);
+                    }
+                    narration_en_cours.set(String::new());
                     faire_defiler_journal();
                 }
                 MessageVersUi::TourTermine { etat: nouvel_etat, resultat_narration, resume_mecanique, vainqueur_combat, partie_terminee } => {
@@ -228,7 +247,9 @@ fn App() -> Element {
 
     let vue_active = match vue() {
         Vue::ErreurChargement(message) => rsx! { ErreurChargement { message } },
-        Vue::SelectionHistoire(histoires) => rsx! {
+        Vue::SelectionHistoire(histoires) => {
+            let tx_nouvelle_histoire = tx.clone();
+            rsx! {
             SelectionHistoire {
                 histoires,
                 erreur: erreur_pre_jeu(),
@@ -238,12 +259,14 @@ fn App() -> Element {
                 },
                 sur_nouvelle_histoire: move |_| {
                     erreur_pre_jeu.set(None);
-                    vue.set(Vue::Creation);
+                    let _ = tx_nouvelle_histoire.send(MessageVersWorker::DemarrerCreationPersonnage);
                 },
             }
+        }
         },
-        Vue::Creation => rsx! {
+        Vue::Creation(valeurs_proposees) => rsx! {
             Creation {
+                valeurs_proposees,
                 sur_creation: move |msg| { let _ = tx.send(msg); }
             }
         },
@@ -251,6 +274,7 @@ fn App() -> Element {
             let Some(etat_actuel) = etat() else {
                 return rsx! { div { "Chargement..." } };
             };
+            let tx_retour_selection = tx.clone();
             rsx! {
                 Jeu {
                     etat: etat_actuel,
@@ -261,6 +285,9 @@ fn App() -> Element {
                         tour_en_cours.set(true);
                         narration_en_cours.set(String::new());
                         let _ = tx.send(msg);
+                    },
+                    sur_retour_selection: move |_| {
+                        let _ = tx_retour_selection.send(MessageVersWorker::RetourSelection);
                     },
                 }
             }

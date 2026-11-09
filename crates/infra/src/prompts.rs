@@ -1,5 +1,16 @@
 use application::ports::narrateur::{ContexteResultat, ContexteTour};
-use domain::{ActionJoueur, EffetObjet, EtatPartie, FichePnj};
+use domain::{ActionJoueur, EffetObjet, EtatPartie, FichePnj, Personnage};
+
+pub fn construire_prompt_introduction(personnage: &Personnage, lieu: &str) -> String {
+    format!(
+        "Tu es le maître du jeu d'un jeu de rôle solo en français.\n\
+         Un·e {} nommé·e {} arrive à {} pour commencer son aventure.\n\
+         Décris cette arrivée et plante le décor du monde en français, en trois ou \
+         quatre phrases, sans combat, sans dialogue et sans inventer de personnage \
+         non-joueur : seulement l'ambiance, le lieu et ce qui s'y trouve.",
+        personnage.classe, personnage.nom, lieu,
+    )
+}
 
 pub fn construire_prompt_classification(contexte: &ContexteTour) -> String {
     format!(

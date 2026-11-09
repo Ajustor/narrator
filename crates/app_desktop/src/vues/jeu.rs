@@ -10,6 +10,7 @@ pub fn Jeu(
     narration_en_cours: String,
     tour_en_cours: bool,
     sur_action: EventHandler<MessageVersWorker>,
+    sur_retour_selection: EventHandler<()>,
 ) -> Element {
     let mut saisie = use_signal(String::new);
     let mut pnj_deplie: Signal<Option<String>> = use_signal(|| None);
@@ -25,6 +26,12 @@ pub fn Jeu(
         div { class: "ecran-jeu",
             div { class: "zone-principale",
                 header { class: "en-tete",
+                    button {
+                        class: "bouton-retour",
+                        disabled: tour_en_cours,
+                        onclick: move |_| sur_retour_selection.call(()),
+                        "← Histoires"
+                    }
                     span { class: "lieu", "{etat.lieu_actuel}" }
                     span { "PV : {etat.personnage.pv_actuels}/{etat.personnage.pv_max}" }
                 }

@@ -1,4 +1,4 @@
-use application::usecases::creer_personnage::{CLASSES_VALIDES, VALEURS_STANDARD};
+use application::usecases::creer_personnage::CLASSES_VALIDES;
 use dioxus::prelude::*;
 
 use crate::modeles::PaletteModele;
@@ -8,24 +8,30 @@ const NOMS_CARACTERISTIQUES: [&str; 6] =
     ["Force", "Dextérité", "Constitution", "Intelligence", "Sagesse", "Charisme"];
 
 #[component]
-pub fn Creation(sur_creation: EventHandler<MessageVersWorker>) -> Element {
+pub fn Creation(valeurs_proposees: [u32; 6], sur_creation: EventHandler<MessageVersWorker>) -> Element {
     let mut nom = use_signal(String::new);
     let mut classe = use_signal(|| CLASSES_VALIDES[0].to_string());
     let mut valeurs = use_signal(|| [0u32; 6]);
     let mut palette = use_signal(|| PaletteModele::Equilibre);
 
+    // Les valeurs tirées aléatoirement peuvent contenir des doublons (ex.
+    // deux "12"), contrairement à l'ancien tableau fixe — donc on ne peut
+    // plus exclure une valeur par simple égalité (ça retirerait TOUTES les
+    // occurrences dès qu'une seule est prise ailleurs, affamant les autres
+    // listes déroulantes). On retire une seule occurrence par emplacement
+    // déjà assigné : ce qui reste est le multi-ensemble réellement
+    // disponible pour cet emplacement.
     let valeurs_disponibles = move |index_a_exclure: usize| -> Vec<u32> {
-        let deja_choisies: Vec<u32> = valeurs()
-            .iter()
-            .enumerate()
-            .filter(|(i, v)| *i != index_a_exclure && **v != 0)
-            .map(|(_, v)| *v)
-            .collect();
-        VALEURS_STANDARD
-            .iter()
-            .copied()
-            .filter(|v| !deja_choisies.contains(v) || valeurs()[index_a_exclure] == *v)
-            .collect()
+        let valeurs_actuelles = valeurs();
+        let mut restantes: Vec<u32> = valeurs_proposees.to_vec();
+        for (i, v) in valeurs_actuelles.iter().enumerate() {
+            if i != index_a_exclure && *v != 0 {
+                if let Some(position) = restantes.iter().position(|x| x == v) {
+                    restantes.remove(position);
+                }
+            }
+        }
+        restantes
     };
 
     let toutes_valeurs_choisies = move || valeurs().iter().all(|v| *v != 0);
@@ -34,6 +40,9 @@ pub fn Creation(sur_creation: EventHandler<MessageVersWorker>) -> Element {
         div { class: "ecran-centre",
             div { class: "carte",
                 h1 { "Création de personnage" }
+                p { class: "texte-discret",
+                    "Caractéristiques tirées pour cette aventure : {valeurs_proposees:?}. Répartis-les comme tu veux."
+                }
                 div { class: "champ",
                     label { "Nom : " }
                     input {
@@ -83,8 +92,13 @@ pub fn Creation(sur_creation: EventHandler<MessageVersWorker>) -> Element {
                                 valeurs.set(v);
                             },
                             option { value: "0", "—" }
-                            for valeur in valeurs_disponibles(index) {
-                                option { key: "{valeur}", value: "{valeur}", "{valeur}" }
+                            for (position, valeur) in valeurs_disponibles(index).into_iter().enumerate() {
+                                // Les valeurs tirées aléatoirement peuvent se répéter (ex.
+                                // deux "10"), donc la valeur seule ne suffit plus comme clé
+                                // unique — contrairement à l'ancien tableau fixe, qui n'avait
+                                // jamais de doublon. `position` (l'index dans CETTE liste
+                                // déjà filtrée, recalculée à chaque rendu) la rend unique.
+                                option { key: "{position}-{valeur}", value: "{valeur}", "{valeur}" }
                             }
                         }
                     }

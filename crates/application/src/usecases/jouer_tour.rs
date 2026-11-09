@@ -495,6 +495,16 @@ mod tests {
         fn detecter_pnj(&mut self, _narration: &str, _noms_connus: &[String]) -> Result<Option<PnjDetecte>, ErreurNarrateur> {
             Ok(None)
         }
+
+        fn raconter_introduction(
+            &mut self,
+            _personnage: &domain::Personnage,
+            _lieu: &str,
+            sur_fragment: &mut dyn FnMut(&str),
+        ) -> Result<String, ErreurNarrateur> {
+            sur_fragment("introduction de test");
+            Ok("introduction de test".to_string())
+        }
     }
 
     #[test]
@@ -619,6 +629,15 @@ mod tests {
         fn detecter_pnj(&mut self, _narration: &str, _noms_connus: &[String]) -> Result<Option<PnjDetecte>, ErreurNarrateur> {
             Ok(None)
         }
+
+        fn raconter_introduction(
+            &mut self,
+            _personnage: &domain::Personnage,
+            _lieu: &str,
+            _sur_fragment: &mut dyn FnMut(&str),
+        ) -> Result<String, ErreurNarrateur> {
+            Ok(String::new())
+        }
     }
 
     struct NarrateurCondensateur {
@@ -652,6 +671,15 @@ mod tests {
         fn detecter_pnj(&mut self, _narration: &str, _noms_connus: &[String]) -> Result<Option<PnjDetecte>, ErreurNarrateur> {
             Ok(None)
         }
+
+        fn raconter_introduction(
+            &mut self,
+            _personnage: &domain::Personnage,
+            _lieu: &str,
+            _sur_fragment: &mut dyn FnMut(&str),
+        ) -> Result<String, ErreurNarrateur> {
+            Ok(String::new())
+        }
     }
 
     struct NarrateurDetectionPnj {
@@ -682,6 +710,15 @@ mod tests {
                     Err(ErreurNarrateur::EchecGeneration(message.clone()))
                 }
             }
+        }
+
+        fn raconter_introduction(
+            &mut self,
+            _personnage: &domain::Personnage,
+            _lieu: &str,
+            _sur_fragment: &mut dyn FnMut(&str),
+        ) -> Result<String, ErreurNarrateur> {
+            Ok(String::new())
         }
     }
 

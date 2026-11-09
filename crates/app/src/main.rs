@@ -1,5 +1,6 @@
 mod creation;
 
+use application::ports::narrateur::Narrateur;
 use application::ports::sauvegarde::ErreurSauvegarde;
 use application::usecases::commencer_combat::commencer_combat;
 use application::usecases::jouer_tour::JouerTour;
@@ -28,7 +29,15 @@ fn main() {
             etat
         }
         Err(ErreurSauvegarde::FichierAbsent) => {
-            let personnage = creation::creer_personnage_interactif();
+            let personnage = creation::creer_personnage_interactif(&mut de);
+            let mut fragment_sortie = |fragment: &str| {
+                print!("{fragment}");
+                io::stdout().flush().ok();
+            };
+            match narrateur.raconter_introduction(&personnage, "Clairière", &mut fragment_sortie) {
+                Ok(_) => println!(),
+                Err(erreur) => eprintln!("\n(échec de l'introduction narrée : {erreur:?})"),
+            }
             let gobelin = Ennemi::nouveau("Gobelin".to_string(), 7, De { faces: 6 }, 12, 2, 3);
             let combat = commencer_combat(&personnage, vec![gobelin], &mut de);
             EtatPartie {

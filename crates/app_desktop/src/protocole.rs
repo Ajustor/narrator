@@ -6,6 +6,7 @@ pub use crate::modeles::PaletteModele;
 #[derive(Debug, Clone)]
 pub enum MessageVersWorker {
     ReprendreHistoire(String),
+    DemarrerCreationPersonnage,
     CreerPersonnage { nom: String, classe: String, valeurs: [u32; 6], palette_modele: PaletteModele },
     JouerTour(String),
     RetourSelection,
@@ -15,7 +16,9 @@ pub enum MessageVersWorker {
 #[derive(Debug, Clone)]
 pub enum MessageVersUi {
     ListeHistoires(Vec<InfoHistoire>),
+    ValeursProposees([u32; 6]),
     PartieCreee(EtatPartie),
+    IntroductionRacontee(String),
     NarrationFragment(String),
     TourTermine { etat: EtatPartie, resultat_narration: String, resume_mecanique: Vec<String>, vainqueur_combat: Option<Vainqueur>, partie_terminee: bool },
     TourEchoue(String),
@@ -26,7 +29,7 @@ pub enum MessageVersUi {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Vue {
     SelectionHistoire(Vec<InfoHistoire>),
-    Creation,
+    Creation([u32; 6]),
     Jeu,
     FinDePartie(Option<Vainqueur>),
     ErreurChargement(String),

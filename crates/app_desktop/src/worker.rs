@@ -2,7 +2,9 @@ use application::ports::generateur_de::GenerateurDe;
 use application::ports::narrateur::Narrateur;
 use application::ports::sauvegarde::{ErreurSauvegarde, Sauvegarde};
 use application::usecases::commencer_combat::commencer_combat;
-use application::usecases::creer_personnage::{creer_personnage, ErreurCreationPersonnage};
+use application::usecases::creer_personnage::{
+    creer_personnage, tirer_valeurs_caracteristiques, ErreurCreationPersonnage,
+};
 use application::usecases::jouer_tour::JouerTour;
 use application::usecases::partie::{charger_partie, sauvegarder_partie};
 use domain::{De, Ennemi, EtatPartie};
@@ -147,12 +149,13 @@ pub fn traiter_message(
         }
 
         // Ces messages n'atteignent jamais `traiter_message` en pratique :
-        // `ReprendreHistoire`/`CreerPersonnage` sont consommés par la
-        // boucle externe de `lancer()` avant qu'une histoire soit
-        // chargée ; `RetourSelection` par `jouer_histoire` ; et
-        // `ConfirmerTelechargement` par `lancer()` pendant le
+        // `ReprendreHistoire`/`DemarrerCreationPersonnage`/`CreerPersonnage`
+        // sont consommés par la boucle externe de `lancer()` avant qu'une
+        // histoire soit chargée ; `RetourSelection` par `jouer_histoire` ;
+        // et `ConfirmerTelechargement` par `lancer()` pendant le
         // téléchargement. L'exhaustivité du `match` impose ces bras.
         MessageVersWorker::ReprendreHistoire(_)
+        | MessageVersWorker::DemarrerCreationPersonnage
         | MessageVersWorker::CreerPersonnage { .. }
         | MessageVersWorker::RetourSelection
         | MessageVersWorker::ConfirmerTelechargement(_) => {}
@@ -222,6 +225,12 @@ pub fn lancer(
                             continue 'selection;
                         }
                     }
+                }
+                Ok(MessageVersWorker::DemarrerCreationPersonnage) => {
+                    let mut de_tirage = infra::GenerateurDeOs;
+                    let valeurs = tirer_valeurs_caracteristiques(&mut de_tirage);
+                    let _ = tx.unbounded_send(MessageVersUi::ValeursProposees(valeurs));
+                    continue;
                 }
                 Ok(MessageVersWorker::CreerPersonnage { nom, classe, valeurs, palette_modele }) => {
                     let mut de_creation = infra::GenerateurDeOs;
@@ -319,6 +328,30 @@ pub fn lancer(
         }
 
         let _ = tx.unbounded_send(MessageVersUi::PartieCreee(etat_initial.clone()));
+
+        // Nouvelle histoire seulement : une scène d'ouverture plante le
+        // décor avant le premier combat, plutôt que de lâcher le joueur
+        // directement dans l'affrontement sans aucun contexte narratif.
+        // Un échec ici n'est pas fatal — on continue sans introduction
+        // plutôt que de bloquer le début de la partie pour ça.
+        if !deja_enregistree {
+            let resultat_intro = narrateur.raconter_introduction(
+                &etat_initial.personnage,
+                &etat_initial.lieu_actuel,
+                &mut |fragment: &str| {
+                    let _ = tx.unbounded_send(MessageVersUi::NarrationFragment(fragment.to_string()));
+                },
+            );
+            match resultat_intro {
+                Ok(texte) => {
+                    let _ = tx.unbounded_send(MessageVersUi::IntroductionRacontee(texte));
+                }
+                Err(erreur) => {
+                    eprintln!("échec de la narration d'introduction : {erreur:?}");
+                    let _ = tx.unbounded_send(MessageVersUi::IntroductionRacontee(String::new()));
+                }
+            }
+        }
 
         let contexte = ContexteHistoire {
             sauvegarde: &sauvegarde,
@@ -419,6 +452,15 @@ mod tests {
         ) -> Result<Option<application::ports::narrateur::PnjDetecte>, application::ports::narrateur::ErreurNarrateur> {
             Ok(None)
         }
+
+        fn raconter_introduction(
+            &mut self,
+            _personnage: &domain::Personnage,
+            _lieu: &str,
+            _sur_fragment: &mut dyn FnMut(&str),
+        ) -> Result<String, application::ports::narrateur::ErreurNarrateur> {
+            Ok(String::new())
+        }
     }
 
     fn etat_sans_combat() -> EtatPartie {
@@ -505,6 +547,15 @@ mod tests {
         ) -> Result<Option<application::ports::narrateur::PnjDetecte>, application::ports::narrateur::ErreurNarrateur> {
             Ok(None)
         }
+
+        fn raconter_introduction(
+            &mut self,
+            _personnage: &domain::Personnage,
+            _lieu: &str,
+            _sur_fragment: &mut dyn FnMut(&str),
+        ) -> Result<String, application::ports::narrateur::ErreurNarrateur> {
+            Ok(String::new())
+        }
     }
 
     #[test]
@@ -568,6 +619,15 @@ mod tests {
             _noms_connus: &[String],
         ) -> Result<Option<application::ports::narrateur::PnjDetecte>, application::ports::narrateur::ErreurNarrateur> {
             Ok(None)
+        }
+
+        fn raconter_introduction(
+            &mut self,
+            _personnage: &domain::Personnage,
+            _lieu: &str,
+            _sur_fragment: &mut dyn FnMut(&str),
+        ) -> Result<String, application::ports::narrateur::ErreurNarrateur> {
+            Ok(String::new())
         }
     }
 

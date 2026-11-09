@@ -18,6 +18,7 @@ html, body {
     background: var(--bg);
     color: var(--text);
     font-family: -apple-system, "Segoe UI", sans-serif;
+    overflow-y: auto;
 }
 
 * {
@@ -28,7 +29,15 @@ html, body {
     display: flex;
     align-items: center;
     justify-content: center;
-    height: 100vh;
+    /* `height: 100vh` figeait ce conteneur à exactement la hauteur de
+       l'écran : un formulaire plus grand qu'un petit écran de téléphone
+       (ex. Création, avec 6 caractéristiques) débordait alors de façon
+       invisible et non scrollable, et l'ouverture du clavier (qui réduit
+       la hauteur visible) décalait tout le contenu. `min-height` laisse
+       le conteneur grandir avec son contenu tout en centrant quand ça
+       rentre, et le `padding` évite que la carte touche les bords. */
+    min-height: 100%;
+    padding: 1.5rem 1rem;
 }
 
 .carte {
@@ -38,6 +47,12 @@ html, body {
     padding: 2rem;
     max-width: 480px;
     width: 100%;
+}
+
+@media (max-width: 480px) {
+    .carte {
+        padding: 1.25rem 1rem;
+    }
 }
 
 .carte h1 {
@@ -50,6 +65,13 @@ html, body {
 
 .champ {
     margin-bottom: 1rem;
+}
+
+.texte-discret {
+    color: var(--text-dim);
+    font-size: 0.85rem;
+    margin-top: 0;
+    margin-bottom: 1.25rem;
 }
 
 .champ label {
@@ -151,6 +173,21 @@ html, body {
 .en-tete .lieu {
     color: var(--accent);
     font-weight: 600;
+}
+
+.bouton-retour {
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text-dim);
+    font-size: 0.85rem;
+    padding: 0.3rem 0.6rem;
+    cursor: pointer;
+}
+
+.bouton-retour:disabled {
+    opacity: 0.5;
+    cursor: default;
 }
 
 .panneau-combat {

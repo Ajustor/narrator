@@ -1,4 +1,4 @@
-use domain::{ActionJoueur, EtatPartie};
+use domain::{ActionJoueur, EtatPartie, Personnage};
 
 #[derive(Debug, Clone)]
 pub struct ContexteTour {
@@ -49,6 +49,10 @@ pub enum ErreurNarrateur {
 ///    `EtatPartie` directly, and the decision of whether a PNJ is already
 ///    known (by matching `noms_connus`) versus new is `application`'s to
 ///    act on, not the implementation's to enforce.
+/// 6. `raconter_introduction` sets the scene for a brand-new character
+///    before anything mechanical happens (no combat, no dice, nothing to
+///    report) — it is streamed like `raconter_resultat`, but never takes a
+///    `ContexteResultat` (there is no resolved action yet to narrate).
 pub trait Narrateur: Send {
     /// Proposes an action for the player's free-text input. No narration,
     /// no streaming — this result is never shown to the player directly.
@@ -80,4 +84,15 @@ pub trait Narrateur: Send {
         narration: &str,
         noms_connus: &[String],
     ) -> Result<Option<PnjDetecte>, ErreurNarrateur>;
+
+    /// Narrates the opening scene for a freshly created character, before
+    /// any turn is played — sets up the world/situation instead of
+    /// dropping the player straight into whatever comes first. Streamed to
+    /// the player via `sur_fragment`, same contract as `raconter_resultat`.
+    fn raconter_introduction(
+        &mut self,
+        personnage: &Personnage,
+        lieu: &str,
+        sur_fragment: &mut dyn FnMut(&str),
+    ) -> Result<String, ErreurNarrateur>;
 }

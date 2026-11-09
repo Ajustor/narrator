@@ -1,13 +1,16 @@
-use application::usecases::creer_personnage::{creer_personnage, CLASSES_VALIDES, VALEURS_STANDARD};
+use application::ports::generateur_de::GenerateurDe;
+use application::usecases::creer_personnage::{
+    creer_personnage, tirer_valeurs_caracteristiques, CLASSES_VALIDES,
+};
 use domain::Personnage;
 use std::io::{self, Write};
 
-pub fn creer_personnage_interactif() -> Personnage {
+pub fn creer_personnage_interactif(de: &mut dyn GenerateurDe) -> Personnage {
     println!("=== Création de personnage ===");
 
     let nom = lire_ligne_non_vide("Nom de ton personnage : ");
     let classe = lire_classe();
-    let valeurs = lire_caracteristiques();
+    let valeurs = lire_caracteristiques(de);
 
     creer_personnage(&nom, &classe, valeurs).expect("construction du personnage échouée")
 }
@@ -41,9 +44,11 @@ fn lire_classe() -> String {
     }
 }
 
-fn lire_caracteristiques() -> [u32; 6] {
+fn lire_caracteristiques(de: &mut dyn GenerateurDe) -> [u32; 6] {
     let noms = ["Force", "Dextérité", "Constitution", "Intelligence", "Sagesse", "Charisme"];
-    let mut disponibles: Vec<u32> = VALEURS_STANDARD.to_vec();
+    let tirage = tirer_valeurs_caracteristiques(de);
+    println!("Caractéristiques tirées pour cette aventure : {:?}", tirage);
+    let mut disponibles: Vec<u32> = tirage.to_vec();
     let mut valeurs = [0u32; 6];
 
     for (i, nom) in noms.iter().enumerate() {
