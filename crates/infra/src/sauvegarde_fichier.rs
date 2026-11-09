@@ -92,7 +92,9 @@ mod tests {
         gobelin.pv_actuels = 3;
         etat.combat_en_cours = Some(Combat {
             ennemis: vec![gobelin],
-            ennemi_agit_avant_joueur: true,
+            initiative_joueur: 10,
+            initiatives_ennemis: vec![20],
+            joueur_esquive: false,
             tour_actuel: 2,
             termine: false,
             vainqueur: None,

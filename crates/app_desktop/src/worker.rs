@@ -739,7 +739,9 @@ mod tests {
         let mut etat_en_combat = etat_sans_combat();
         etat_en_combat.combat_en_cours = Some(domain::Combat {
             ennemis: vec![domain::Ennemi::nouveau("Gobelin".into(), 7, domain::De { faces: 6 }, 12, 2, 3)],
-            ennemi_agit_avant_joueur: false,
+            initiative_joueur: 10,
+            initiatives_ennemis: vec![0],
+            joueur_esquive: false,
             tour_actuel: 0,
             termine: false,
             vainqueur: None,
@@ -747,9 +749,11 @@ mod tests {
         etat_en_combat.personnage.subir_degats(etat_en_combat.personnage.pv_max);
         let mut etat: Option<EtatPartie> = Some(etat_en_combat);
         let mut narrateur = NarrateurMort;
-        // ActionLibre ne consomme aucun dé du joueur ; l'ennemi agit
-        // ensuite (attaque puis dégâts) via `de_monde`.
-        let mut de_joueur = GenerateurDeSeedLocal::nouveau(vec![]);
+        // Une action libre en combat devient une attaque improvisée avec
+        // désavantage (deux 5 => total 9 < défense 12 du gobelin, manqué,
+        // sans incidence sur ce test) ; l'ennemi agit ensuite (attaque
+        // puis dégâts) via `de_monde`.
+        let mut de_joueur = GenerateurDeSeedLocal::nouveau(vec![5, 5]);
         let mut de_monde = GenerateurDeSeedLocal::nouveau(vec![10, 4]);
         let mut messages_envoyes = Vec::new();
         let contexte = ContexteHistoire {

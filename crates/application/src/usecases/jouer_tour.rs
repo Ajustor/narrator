@@ -1,7 +1,10 @@
 use crate::ports::generateur_de::GenerateurDe;
 use crate::ports::narrateur::{ContexteResultat, ContexteTour, ErreurNarrateur, Narrateur};
 use crate::usecases::commencer_combat::commencer_combat;
-use domain::{resoudre_attaque, ActionJoueur, De, EffetObjet, Ennemi, EtatPartie, FichePnj, Vainqueur};
+use domain::{
+    evaluer_jet_attaque, modificateur, ActionJoueur, Acteur, De, EffetObjet, Ennemi, EtatPartie, FichePnj, JetDe,
+    Vainqueur, BONUS_MAITRISE,
+};
 
 // SEUIL_MOTS_RESUMES est choisi pour rester largement sous TAILLE_CONTEXTE
 // (4096 tokens, dans infra::llama_narrateur) une fois converti en tokens —
@@ -51,8 +54,41 @@ pub fn valider_action(action: &ActionJoueur, etat: &EtatPartie) -> Result<(), Er
                 Err(ErreurTour::AucunCombatEnCours)
             }
         }
+        ActionJoueur::Esquiver => {
+            if etat.combat_en_cours.is_some() {
+                Ok(())
+            } else {
+                Err(ErreurTour::AucunCombatEnCours)
+            }
+        }
         ActionJoueur::ActionLibre(_) => Ok(()),
     }
+}
+
+/// Lance un dé avec désavantage (D&D : deux jets, on garde le total le plus
+/// bas) — utilisé pour les attaques ennemies pendant qu'une esquive du
+/// joueur est active, et pour toute action libre du joueur en combat (une
+/// tentative improvisée n'a pas la précision d'une vraie attaque).
+fn lancer_desavantage(de: &mut dyn GenerateurDe, type_de: De, modificateur: i32) -> JetDe {
+    let premier = de.lancer(type_de, modificateur);
+    let second = de.lancer(type_de, modificateur);
+    if premier.total <= second.total {
+        premier
+    } else {
+        second
+    }
+}
+
+/// Lance les dégâts d'une attaque : relancés une deuxième fois et sommés
+/// (pas multipliés) en cas de critique, comme en D&D 5e — le modificateur
+/// n'est appliqué qu'une fois.
+fn lancer_degats(de: &mut dyn GenerateurDe, type_de: De, critique: bool) -> JetDe {
+    if !critique {
+        return de.lancer(type_de, 0);
+    }
+    let premier = de.lancer(type_de, 0);
+    let second = de.lancer(type_de, 0);
+    JetDe::nouveau(premier.resultat + second.resultat, 0)
 }
 
 pub fn resoudre_action_joueur(
@@ -63,31 +99,32 @@ pub fn resoudre_action_joueur(
     let mut resume = Vec::new();
     match action {
         ActionJoueur::Attaquer { cible } => {
-            let modificateur_dex = domain::modificateur(etat.personnage.caracteristiques.dexterite);
-            let jet_attaque = de.lancer(De { faces: 20 }, modificateur_dex);
+            let modificateur_attaque = modificateur(etat.personnage.caracteristiques.dexterite) + BONUS_MAITRISE;
+            let jet_attaque = de.lancer(De { faces: 20 }, modificateur_attaque);
             let arme = etat.personnage.arme_equipee();
 
             if let Some(combat) = etat.combat_en_cours.as_mut() {
                 if let Some(ennemi) = combat.trouver_ennemi_vivant_mut(cible) {
-                    // Le jet de dégâts n'est lancé que si l'attaque touche
-                    // réellement : avec un dé automatique ça ne changeait
-                    // rien (lancé dans tous les cas puis ignoré en cas de
-                    // raté), mais avec le dé du joueur (voir `de`, qui peut
-                    // maintenant attendre une action du joueur), lui
-                    // demander un jet de dégâts pour une attaque déjà
-                    // ratée n'aurait aucun sens.
-                    if domain::attaque_touche(jet_attaque.total, ennemi.defense) {
-                        let jet_degats = de.lancer(arme, 0);
-                        let resolution = resoudre_attaque(jet_attaque.total, ennemi.defense, jet_degats);
-                        ennemi.subir_degats(resolution.degats);
+                    let evaluation = evaluer_jet_attaque(jet_attaque, ennemi.defense);
+                    if evaluation.touche {
+                        let jet_degats = lancer_degats(de, arme, evaluation.critique);
+                        let degats = jet_degats.total.max(0);
+                        ennemi.subir_degats(degats);
                         resume.push(format!(
-                            "🎲 Tu attaques {} : {} vs défense {} — touché ! Dégâts : {}",
-                            ennemi.nom, jet_attaque.total, ennemi.defense, resolution.degats
+                            "🎲 Tu attaques {} : {} vs défense {} — touché{} ! Dégâts : {}",
+                            ennemi.nom,
+                            jet_attaque.total,
+                            ennemi.defense,
+                            if evaluation.critique { " (critique)" } else { "" },
+                            degats
                         ));
                     } else {
                         resume.push(format!(
-                            "🎲 Tu attaques {} : {} vs défense {} — manqué",
-                            ennemi.nom, jet_attaque.total, ennemi.defense
+                            "🎲 Tu attaques {} : {} vs défense {} — {}",
+                            ennemi.nom,
+                            jet_attaque.total,
+                            ennemi.defense,
+                            if jet_attaque.resultat == 1 { "échec critique" } else { "manqué" }
                         ));
                     }
                 }
@@ -107,7 +144,56 @@ pub fn resoudre_action_joueur(
             }
             resume.push("Tu prends la fuite.".to_string());
         }
-        ActionJoueur::ActionLibre(_) => {}
+        ActionJoueur::Esquiver => {
+            if let Some(combat) = etat.combat_en_cours.as_mut() {
+                combat.joueur_esquive = true;
+            }
+            resume.push("🛡️ Tu te mets en garde, prêt à esquiver la prochaine attaque.".to_string());
+        }
+        ActionJoueur::ActionLibre(texte) => {
+            // Avant, une action libre en combat n'avait AUCUN effet
+            // mécanique (ni jet, ni dégâts), même quand le récit généré
+            // décrivait quelque chose — c'est la cause du rapport « mes
+            // actions ne sont pas prises en compte ». Désormais, toute
+            // action créative pendant un combat actif devient une attaque
+            // improvisée réelle contre le premier ennemi vivant, avec
+            // désavantage (elle n'a pas la précision d'une vraie attaque).
+            // Hors combat, une action libre reste purement narrative.
+            let combat_actif = etat.combat_en_cours.as_ref().map(|c| !c.termine).unwrap_or(false);
+            if combat_actif {
+                let modificateur_attaque = modificateur(etat.personnage.caracteristiques.dexterite) + BONUS_MAITRISE;
+                let arme = etat.personnage.arme_equipee();
+                if let Some(combat) = etat.combat_en_cours.as_mut() {
+                    if let Some(ennemi) = combat.ennemis.iter_mut().find(|e| !e.est_mort()) {
+                        let jet_attaque = lancer_desavantage(de, De { faces: 20 }, modificateur_attaque);
+                        let evaluation = evaluer_jet_attaque(jet_attaque, ennemi.defense);
+                        if evaluation.touche {
+                            let jet_degats = lancer_degats(de, arme, evaluation.critique);
+                            let degats = jet_degats.total.max(0);
+                            ennemi.subir_degats(degats);
+                            resume.push(format!(
+                                "🎲 Tentative improvisée (« {} ») contre {} : {} vs défense {} — touché{} ! Dégâts : {}",
+                                texte,
+                                ennemi.nom,
+                                jet_attaque.total,
+                                ennemi.defense,
+                                if evaluation.critique { " (critique)" } else { "" },
+                                degats
+                            ));
+                        } else {
+                            resume.push(format!(
+                                "🎲 Tentative improvisée (« {} ») contre {} : {} vs défense {} — {}",
+                                texte,
+                                ennemi.nom,
+                                jet_attaque.total,
+                                ennemi.defense,
+                                if jet_attaque.resultat == 1 { "échec critique" } else { "manqué" }
+                            ));
+                        }
+                    }
+                }
+            }
+        }
     }
     resume
 }
@@ -127,42 +213,76 @@ pub struct ResultatTour {
     pub partie_terminee: bool,
 }
 
-pub fn resoudre_action_ennemis(etat: &mut EtatPartie, de: &mut dyn GenerateurDe) -> Vec<String> {
+/// Résout l'attaque d'un seul ennemi (par son indice dans `combat.ennemis`)
+/// contre le joueur. Remplace l'ancienne `resoudre_action_ennemis`, qui
+/// résolvait tous les ennemis d'un bloc avant ou après le joueur — voir
+/// `Combat::ordre_de_tour`, qui classe désormais chaque combattant
+/// individuellement et appelle cette fonction une fois par ennemi, dans
+/// l'ordre.
+pub fn resoudre_attaque_ennemi(etat: &mut EtatPartie, de: &mut dyn GenerateurDe, indice: usize) -> Vec<String> {
     let mut resume = Vec::new();
     let defense_joueur = etat.personnage.defense();
+    let desavantage = etat.combat_en_cours.as_ref().map(|c| c.joueur_esquive).unwrap_or(false);
 
-    let Some(combat) = etat.combat_en_cours.as_mut() else {
+    let Some(combat) = etat.combat_en_cours.as_ref() else {
         return resume;
     };
     if combat.termine {
         return resume;
     }
-
-    let mut degats_totaux = 0;
-    for ennemi in combat.ennemis.iter_mut().filter(|e| !e.est_mort()) {
-        let jet_attaque = de.lancer(De { faces: 20 }, ennemi.bonus_attaque);
-        let jet_degats = de.lancer(ennemi.degats, 0);
-        let resolution = resoudre_attaque(jet_attaque.total, defense_joueur, jet_degats);
-        if resolution.touche {
-            degats_totaux += resolution.degats;
-            resume.push(format!(
-                "🎲 {} t'attaque : {} vs défense {} — touché ! Dégâts : {}",
-                ennemi.nom, jet_attaque.total, defense_joueur, resolution.degats
-            ));
-        } else {
-            resume.push(format!(
-                "🎲 {} t'attaque : {} vs défense {} — manqué",
-                ennemi.nom, jet_attaque.total, defense_joueur
-            ));
-        }
+    let Some(ennemi) = combat.ennemis.get(indice) else {
+        return resume;
+    };
+    if ennemi.est_mort() {
+        return resume;
     }
+    // Copie des champs nécessaires avant de lâcher l'emprunt immuable sur
+    // `combat` : `etat.personnage.subir_degats` emprunte `etat` plus bas.
+    let (nom, bonus_attaque, degats_de) = (ennemi.nom.clone(), ennemi.bonus_attaque, ennemi.degats);
 
-    etat.personnage.subir_degats(degats_totaux);
+    let jet_attaque = if desavantage {
+        lancer_desavantage(de, De { faces: 20 }, bonus_attaque)
+    } else {
+        de.lancer(De { faces: 20 }, bonus_attaque)
+    };
+    let evaluation = evaluer_jet_attaque(jet_attaque, defense_joueur);
+
+    if evaluation.touche {
+        let jet_degats = lancer_degats(de, degats_de, evaluation.critique);
+        let degats = jet_degats.total.max(0);
+        etat.personnage.subir_degats(degats);
+        resume.push(format!(
+            "🎲 {} t'attaque : {} vs défense {} — touché{} ! Dégâts : {}",
+            nom,
+            jet_attaque.total,
+            defense_joueur,
+            if evaluation.critique { " (critique)" } else { "" },
+            degats
+        ));
+    } else {
+        resume.push(format!(
+            "🎲 {} t'attaque : {} vs défense {} — {}",
+            nom,
+            jet_attaque.total,
+            defense_joueur,
+            if jet_attaque.resultat == 1 { "échec critique" } else { "manqué" }
+        ));
+    }
     resume
 }
 
 fn combat_termine(etat: &EtatPartie) -> bool {
     etat.combat_en_cours.as_ref().map(|c| c.termine).unwrap_or(true)
+}
+
+/// `true` seulement si un combat est actif ET déjà conclu — à distinguer
+/// de `combat_termine`, qui renvoie aussi `true` quand il n'y a pas de
+/// combat du tout (pratique pour les appelants qui veulent dire « plus
+/// rien à résoudre côté combat », mais inutilisable comme condition
+/// d'arrêt de la boucle de résolution d'un tour : hors combat, elle
+/// arrêterait tout avant même l'action du joueur).
+fn combat_actif_et_conclu(etat: &EtatPartie) -> bool {
+    etat.combat_en_cours.as_ref().map(|c| c.termine).unwrap_or(false)
 }
 
 /// Déclenche la toute première rencontre d'une histoire (le Gobelin de la
@@ -315,25 +435,37 @@ impl JouerTour {
         if fuite {
             resume.extend(resoudre_action_joueur(etat, &action_proposee, de_joueur));
         } else {
-            let ennemi_avant = etat
+            // Ordre d'initiative complet (joueur + chaque ennemi
+            // individuellement, voir `Combat::ordre_de_tour`) plutôt que
+            // l'ancien booléen qui groupait tous les ennemis avant ou
+            // après le joueur. Hors combat, un seul acteur : le joueur.
+            let ordre = etat
                 .combat_en_cours
                 .as_ref()
-                .map(|c| c.ennemi_agit_avant_joueur)
-                .unwrap_or(false);
+                .map(|c| c.ordre_de_tour())
+                .unwrap_or_else(|| vec![Acteur::Joueur]);
 
-            if ennemi_avant {
-                resume.extend(resoudre_action_ennemis(etat, de_monde));
-                terminer_si_joueur_mort(etat);
-                if !combat_termine(etat) {
-                    resume.extend(resoudre_action_joueur(etat, &action_proposee, de_joueur));
-                    terminer_si_ennemis_morts(etat);
+            for acteur in ordre {
+                if combat_actif_et_conclu(etat) {
+                    break;
                 }
-            } else {
-                resume.extend(resoudre_action_joueur(etat, &action_proposee, de_joueur));
-                terminer_si_ennemis_morts(etat);
-                if !combat_termine(etat) {
-                    resume.extend(resoudre_action_ennemis(etat, de_monde));
-                    terminer_si_joueur_mort(etat);
+                match acteur {
+                    Acteur::Joueur => {
+                        // La protection d'une esquive déclarée au tour
+                        // précédent s'arrête au début de ce nouveau tour
+                        // du joueur ("jusqu'au début de ton tour suivant"
+                        // en D&D) — elle a déjà protégé les éventuelles
+                        // attaques ennemies rencontrées depuis.
+                        if let Some(combat) = etat.combat_en_cours.as_mut() {
+                            combat.joueur_esquive = false;
+                        }
+                        resume.extend(resoudre_action_joueur(etat, &action_proposee, de_joueur));
+                        terminer_si_ennemis_morts(etat);
+                    }
+                    Acteur::Ennemi(indice) => {
+                        resume.extend(resoudre_attaque_ennemi(etat, de_monde, indice));
+                        terminer_si_joueur_mort(etat);
+                    }
                 }
             }
         }
@@ -394,10 +526,12 @@ mod tests {
         let mut etat = etat_sans_combat();
         etat.combat_en_cours = Some(Combat {
             ennemis: vec![Ennemi::nouveau("Gobelin".into(), 7, De { faces: 6 }, 12, 2, 3)],
-            ennemi_agit_avant_joueur: false,
+            initiative_joueur: 10,
+            initiatives_ennemis: vec![0], // joueur plus rapide => il agit en premier (ancien défaut `ennemi_agit_avant_joueur: false`)
             tour_actuel: 0,
             termine: false,
             vainqueur: None,
+            joueur_esquive: false,
         });
         etat
     }
@@ -453,6 +587,18 @@ mod tests {
     }
 
     #[test]
+    fn esquiver_sans_combat_est_invalide() {
+        let resultat = valider_action(&ActionJoueur::Esquiver, &etat_sans_combat());
+        assert_eq!(resultat, Err(ErreurTour::AucunCombatEnCours));
+    }
+
+    #[test]
+    fn esquiver_en_combat_est_valide() {
+        let resultat = valider_action(&ActionJoueur::Esquiver, &etat_en_combat());
+        assert_eq!(resultat, Ok(()));
+    }
+
+    #[test]
     fn action_libre_est_toujours_valide() {
         let resultat = valider_action(&ActionJoueur::ActionLibre("Je regarde autour de moi".into()), &etat_sans_combat());
         assert_eq!(resultat, Ok(()));
@@ -464,8 +610,8 @@ mod tests {
     #[test]
     fn attaquer_qui_touche_infflige_des_degats() {
         let mut etat = etat_en_combat();
-        // attaque: d20=10 + mod_dex(14)=2 => 12 >= defense 12 (touché)
-        // dégâts: d8=5 (épée par défaut quand aucune arme en inventaire -> mains nues d4 ici, voir note)
+        // attaque: d20=10 + mod_dex(14)=2 + maîtrise 2 => 14 >= defense 12 (touché, pas critique)
+        // dégâts: mains nues d4=3 (aucune arme en inventaire)
         let mut de = GenerateurDeSeed::nouveau(vec![10, 3]);
         let resume = resoudre_action_joueur(&mut etat, &ActionJoueur::Attaquer { cible: "Gobelin".into() }, &mut de);
         let gobelin = &etat.combat_en_cours.as_ref().unwrap().ennemis[0];
@@ -476,7 +622,7 @@ mod tests {
     #[test]
     fn attaquer_qui_rate_n_infflige_aucun_degat() {
         let mut etat = etat_en_combat();
-        // attaque: d20=5 + mod_dex(14)=2 => 7 < defense 12 (manqué)
+        // attaque: d20=5 + mod_dex(14)=2 + maîtrise 2 => 9 < defense 12 (manqué)
         let mut de = GenerateurDeSeed::nouveau(vec![5, 3]);
         let resume = resoudre_action_joueur(&mut etat, &ActionJoueur::Attaquer { cible: "Gobelin".into() }, &mut de);
         let gobelin = &etat.combat_en_cours.as_ref().unwrap().ennemis[0];
@@ -489,13 +635,81 @@ mod tests {
         // Un seul résultat programmé (le jet d'attaque) : si le code
         // tentait quand même de lancer les dégâts après un raté, ce
         // deuxième `.lancer()` ferait paniquer `GenerateurDeSeed`
-        // ("plus de résultats programmés") — avec un dé réel automatique
-        // ça ne changeait rien (lancé puis ignoré), mais avec le dé du
-        // joueur (voir `worker::GenerateurDeJoueur`), ça lui demanderait un
-        // jet de dégâts pour une attaque déjà ratée.
+        // ("plus de résultats programmés").
         let mut etat = etat_en_combat();
-        let mut de = GenerateurDeSeed::nouveau(vec![5]); // d20=5 + mod_dex(14)=2 => 7 < défense 12 (manqué)
+        let mut de = GenerateurDeSeed::nouveau(vec![5]); // d20=5 + 2 + 2 => 9 < défense 12 (manqué)
         let resume = resoudre_action_joueur(&mut etat, &ActionJoueur::Attaquer { cible: "Gobelin".into() }, &mut de);
+        assert!(resume[0].contains("manqué"));
+    }
+
+    #[test]
+    fn attaquer_avec_un_20_naturel_touche_toujours_et_double_les_des_de_degats() {
+        // d20=20 touche toujours et déclenche un critique, même ici où le
+        // total ne serait pas suffisant sans le bonus : dégâts = deux d4
+        // relancés et sommés (mains nues), pas doublés arithmétiquement.
+        let mut etat = etat_en_combat();
+        let mut de = GenerateurDeSeed::nouveau(vec![20, 2, 3]);
+        let resume = resoudre_action_joueur(&mut etat, &ActionJoueur::Attaquer { cible: "Gobelin".into() }, &mut de);
+        let gobelin = &etat.combat_en_cours.as_ref().unwrap().ennemis[0];
+        assert_eq!(gobelin.pv_actuels, 2); // 7 - (2 + 3)
+        assert!(resume[0].contains("critique"));
+    }
+
+    #[test]
+    fn attaquer_avec_un_1_naturel_rate_toujours_meme_si_le_total_aurait_suffi() {
+        // mod_dex(14)=2 + maîtrise 2 = 4, donc un 1 donnerait un total de 5
+        // — largement insuffisant ici de toute façon, mais le point est
+        // que le résultat brut de 1 est ce qui décide, pas le total.
+        let mut etat = etat_en_combat();
+        let mut de = GenerateurDeSeed::nouveau(vec![1]);
+        let resume = resoudre_action_joueur(&mut etat, &ActionJoueur::Attaquer { cible: "Gobelin".into() }, &mut de);
+        let gobelin = &etat.combat_en_cours.as_ref().unwrap().ennemis[0];
+        assert_eq!(gobelin.pv_actuels, 7);
+        assert!(resume[0].contains("échec critique"));
+    }
+
+    #[test]
+    fn esquiver_active_le_flag_sur_le_combat() {
+        let mut etat = etat_en_combat();
+        let mut de = GenerateurDeSeed::nouveau(vec![]);
+        let resume = resoudre_action_joueur(&mut etat, &ActionJoueur::Esquiver, &mut de);
+        assert!(etat.combat_en_cours.as_ref().unwrap().joueur_esquive);
+        assert!(resume[0].contains("esquiver"));
+    }
+
+    #[test]
+    fn action_libre_hors_combat_ne_consomme_aucun_de() {
+        let mut etat = etat_sans_combat();
+        let mut de = GenerateurDeSeed::nouveau(vec![]);
+        let resume = resoudre_action_joueur(&mut etat, &ActionJoueur::ActionLibre("J'observe".into()), &mut de);
+        assert!(resume.is_empty());
+    }
+
+    #[test]
+    fn action_libre_en_combat_devient_une_attaque_improvisee_qui_peut_infliger_des_degats() {
+        // Avant cette correction, une action libre en combat n'avait
+        // aucun effet mécanique — c'était le cœur du rapport « mes
+        // actions ne comptent pas ». Désavantage : deux jets, on garde le
+        // plus bas (10 < 15) => 10 + mod_dex(2) + maîtrise(2) = 14 >= 12
+        // (touché) ; dégâts d4=3.
+        let mut etat = etat_en_combat();
+        let mut de = GenerateurDeSeed::nouveau(vec![10, 15, 3]);
+        let resume = resoudre_action_joueur(&mut etat, &ActionJoueur::ActionLibre("je lui jette du sable".into()), &mut de);
+        let gobelin = &etat.combat_en_cours.as_ref().unwrap().ennemis[0];
+        assert_eq!(gobelin.pv_actuels, 4); // 7 - 3
+        assert!(resume[0].contains("touché"));
+        assert!(resume[0].contains("je lui jette du sable"));
+    }
+
+    #[test]
+    fn action_libre_en_combat_rate_ne_lance_jamais_le_de_de_degats() {
+        // Désavantage : deux 5 => 5 + 2 + 2 = 9 < défense 12 (manqué). Un
+        // seul couple de valeurs programmé pour le jet d'attaque ; un
+        // troisième `.lancer()` pour des dégâts ferait paniquer
+        // `GenerateurDeSeed`.
+        let mut etat = etat_en_combat();
+        let mut de = GenerateurDeSeed::nouveau(vec![5, 5]);
+        let resume = resoudre_action_joueur(&mut etat, &ActionJoueur::ActionLibre("je recule".into()), &mut de);
         assert!(resume[0].contains("manqué"));
     }
 
@@ -518,14 +732,6 @@ mod tests {
         let combat = etat.combat_en_cours.as_ref().unwrap();
         assert!(combat.termine);
         assert_eq!(combat.vainqueur, Some(Vainqueur::Fuite));
-    }
-
-    #[test]
-    fn action_libre_ne_consomme_aucun_de() {
-        let mut etat = etat_sans_combat();
-        let mut de = GenerateurDeSeed::nouveau(vec![]);
-        let resume = resoudre_action_joueur(&mut etat, &ActionJoueur::ActionLibre("J'observe".into()), &mut de);
-        assert!(resume.is_empty());
     }
 
     use crate::ports::narrateur::{ContexteResultat, ContexteTour, ErreurNarrateur, Narrateur, PnjDetecte};
@@ -568,21 +774,54 @@ mod tests {
     }
 
     #[test]
-    fn resoudre_action_ennemis_infflige_des_degats_au_joueur() {
+    fn resoudre_attaque_ennemi_infflige_des_degats_au_joueur() {
         let mut etat = etat_en_combat();
         // ennemi (Gobelin, bonus_attaque 3) : d20=10 => total 13 >= défense joueur 12 (touché)
         let mut de = GenerateurDeSeed::nouveau(vec![10, 4]); // attaque puis dégâts (d6=4)
-        let resume = resoudre_action_ennemis(&mut etat, &mut de);
+        let resume = resoudre_attaque_ennemi(&mut etat, &mut de, 0);
         assert_eq!(etat.personnage.pv_actuels, etat.personnage.pv_max - 4);
         assert!(resume[0].contains("touché"));
     }
 
     #[test]
-    fn resoudre_action_ennemis_ne_fait_rien_si_combat_termine() {
+    fn resoudre_attaque_ennemi_qui_rate_ne_lance_jamais_le_de_de_degats() {
+        let mut etat = etat_en_combat();
+        // d20=1 => résultat brut 1, rate toujours quel que soit le bonus.
+        // Un seul résultat programmé : un deuxième `.lancer()` pour des
+        // dégâts ferait paniquer `GenerateurDeSeed`.
+        let mut de = GenerateurDeSeed::nouveau(vec![1]);
+        let resume = resoudre_attaque_ennemi(&mut etat, &mut de, 0);
+        assert_eq!(etat.personnage.pv_actuels, etat.personnage.pv_max);
+        assert!(resume[0].contains("échec critique"));
+    }
+
+    #[test]
+    fn resoudre_attaque_ennemi_sous_desavantage_garde_le_jet_le_plus_bas() {
+        let mut etat = etat_en_combat();
+        etat.combat_en_cours.as_mut().unwrap().joueur_esquive = true;
+        // Désavantage : 15 puis 3 => on garde 3 (le plus bas) => 3+3=6 < 12
+        // (manqué), malgré le 15 qui aurait largement touché seul.
+        let mut de = GenerateurDeSeed::nouveau(vec![15, 3]);
+        let resume = resoudre_attaque_ennemi(&mut etat, &mut de, 0);
+        assert_eq!(etat.personnage.pv_actuels, etat.personnage.pv_max);
+        assert!(resume[0].contains("manqué"));
+    }
+
+    #[test]
+    fn resoudre_attaque_ennemi_ne_fait_rien_si_combat_termine() {
         let mut etat = etat_en_combat();
         etat.combat_en_cours.as_mut().unwrap().terminer(Vainqueur::Joueur);
         let mut de = GenerateurDeSeed::nouveau(vec![]);
-        let resume = resoudre_action_ennemis(&mut etat, &mut de);
+        let resume = resoudre_attaque_ennemi(&mut etat, &mut de, 0);
+        assert!(resume.is_empty());
+    }
+
+    #[test]
+    fn resoudre_attaque_ennemi_ne_fait_rien_pour_un_ennemi_deja_mort() {
+        let mut etat = etat_en_combat();
+        etat.combat_en_cours.as_mut().unwrap().ennemis[0].subir_degats(100);
+        let mut de = GenerateurDeSeed::nouveau(vec![]);
+        let resume = resoudre_attaque_ennemi(&mut etat, &mut de, 0);
         assert!(resume.is_empty());
     }
 
@@ -591,7 +830,7 @@ mod tests {
         let mut etat = etat_en_combat();
         etat.combat_en_cours.as_mut().unwrap().ennemis[0].pv_actuels = 1;
         let mut narrateur = NarrateurDeTest { action: ActionJoueur::Attaquer { cible: "Gobelin".into() } };
-        // attaque: d20=10 + mod_dex(14)=2 => 12 >= defense 12 (touché) ; dégâts d4=3 (mains nues, tue le gobelin à 1 pv)
+        // attaque: d20=10 + mod_dex(2) + maîtrise(2) => 14 >= defense 12 (touché) ; dégâts d4=3 (mains nues, tue le gobelin à 1 pv)
         let mut de_joueur = GenerateurDeSeed::nouveau(vec![10, 3]);
         let mut de_monde = GenerateurDeSeed::nouveau(vec![]);
         let resultat = JouerTour::executer(&mut etat, "j'attaque le gobelin", &mut narrateur, &mut de_joueur, &mut de_monde, &mut |_| {}).unwrap();
@@ -617,12 +856,14 @@ mod tests {
         let mut etat = etat_en_combat();
         etat.personnage.subir_degats(etat.personnage.pv_max); // 0 PV
         let mut narrateur = NarrateurDeTest { action: ActionJoueur::ActionLibre("j'observe".into()) };
-        // ennemi_agit_avant_joueur est false (étape par défaut) : l'action
-        // libre du joueur ne consomme pas de dé, puis l'ennemi attaque
-        // (jet d'attaque + jet de dégâts) — déjà sans effet, le joueur
-        // étant déjà à 0 PV, mais `resoudre_action_ennemis` consomme ces
-        // deux dés avant même de vérifier la mort.
-        let mut de_joueur = GenerateurDeSeed::nouveau(vec![]);
+        // Le combat n'est pas encore flaggé `termine` au début de ce tour
+        // (seul `terminer_si_joueur_mort`, appelé après le tour du
+        // gobelin, le fera) : le tour se résout donc intégralement malgré
+        // les 0 PV déjà présents. Action libre en combat => attaque
+        // improvisée avec désavantage (deux 5 => total 9 < défense 12,
+        // manqué, sans incidence puisque le gobelin ne meurt pas ici) ;
+        // puis le gobelin attaque et termine la partie.
+        let mut de_joueur = GenerateurDeSeed::nouveau(vec![5, 5]);
         let mut de_monde = GenerateurDeSeed::nouveau(vec![10, 4]);
         let resultat = JouerTour::executer(&mut etat, "j'observe", &mut narrateur, &mut de_joueur, &mut de_monde, &mut |_| {}).unwrap();
         assert_eq!(resultat.vainqueur_combat, Some(Vainqueur::Ennemis));
@@ -636,14 +877,39 @@ mod tests {
     #[test]
     fn jouer_tour_ennemi_plus_rapide_agit_avant_le_joueur() {
         let mut etat = etat_en_combat();
-        etat.combat_en_cours.as_mut().unwrap().ennemi_agit_avant_joueur = true;
+        etat.combat_en_cours.as_mut().unwrap().initiatives_ennemis = vec![20]; // bien plus rapide que l'initiative du joueur (10)
         let mut narrateur = NarrateurDeTest { action: ActionJoueur::ActionLibre("j'observe".into()) };
         // ennemi: d20=10 + bonus_attaque 3 = 13 >= defense joueur 12 (touché) ; dégâts d6=4
-        let mut de_joueur = GenerateurDeSeed::nouveau(vec![]);
+        // puis le joueur agit : action libre en combat => attaque improvisée
+        // avec désavantage (deux 5 => total 9 < défense 12, manqué).
+        let mut de_joueur = GenerateurDeSeed::nouveau(vec![5, 5]);
         let mut de_monde = GenerateurDeSeed::nouveau(vec![10, 4]);
         let resultat = JouerTour::executer(&mut etat, "j'observe", &mut narrateur, &mut de_joueur, &mut de_monde, &mut |_| {}).unwrap();
         assert_eq!(etat.personnage.pv_actuels, etat.personnage.pv_max - 4);
         assert_eq!(resultat.vainqueur_combat, None);
+    }
+
+    #[test]
+    fn jouer_tour_plusieurs_ennemis_agissent_chacun_a_leur_place_dans_l_ordre_d_initiative() {
+        let mut etat = etat_en_combat();
+        {
+            let combat = etat.combat_en_cours.as_mut().unwrap();
+            // Gobelin B (index 1), plus rapide (18) que le joueur (10),
+            // agit avant lui ; Gobelin A (index 0, 0) agit après.
+            combat.ennemis.push(Ennemi::nouveau("Gobelin B".into(), 7, De { faces: 6 }, 12, 2, 3));
+            combat.initiatives_ennemis = vec![0, 18];
+        }
+        let mut narrateur = NarrateurDeTest { action: ActionJoueur::ActionLibre("j'observe".into()) };
+        // ordre attendu : Ennemi(1) [Gobelin B], Joueur, Ennemi(0) [Gobelin A]
+        // Gobelin B : d20=10+3=13>=12 touché, dégâts d6=2
+        // Joueur (action libre, désavantage) : deux 5 => 9<12 manqué
+        // Gobelin A : d20=1 => échec critique automatique, pas de dégâts
+        let mut de_joueur = GenerateurDeSeed::nouveau(vec![5, 5]);
+        let mut de_monde = GenerateurDeSeed::nouveau(vec![10, 2, 1]);
+        let resultat = JouerTour::executer(&mut etat, "j'observe", &mut narrateur, &mut de_joueur, &mut de_monde, &mut |_| {}).unwrap();
+        assert_eq!(etat.personnage.pv_actuels, etat.personnage.pv_max - 2);
+        assert!(resultat.resume_mecanique.iter().any(|l| l.contains("Gobelin B") && l.contains("touché")));
+        assert!(resultat.resume_mecanique.iter().any(|l| l.contains("échec critique")));
     }
 
     #[test]
@@ -672,12 +938,15 @@ mod tests {
         let mut etat = etat_sans_combat();
         etat.rencontre_initiale_declenchee = false;
         let mut narrateur = NarrateurDeTest { action: ActionJoueur::ActionLibre("j'observe".into()) };
-        let mut de_joueur = GenerateurDeSeed::nouveau(vec![]);
+        // de_joueur : action libre en combat => attaque improvisée avec
+        // désavantage (deux 5 => total 9, en-dessous de la défense du
+        // Gobelin 12 => manqué, sans incidence sur ce test).
+        let mut de_joueur = GenerateurDeSeed::nouveau(vec![5, 5]);
         // de_monde : initiative joueur (10), initiative gobelin (5) pour
-        // `amorcer_rencontre_initiale`, puis attaque (1) + dégâts (1) du
-        // gobelin qui agit ensuite (le joueur, plus rapide, agit en
-        // premier avec une action libre qui ne consomme aucun dé).
-        let mut de_monde = GenerateurDeSeed::nouveau(vec![10, 5, 1, 1]);
+        // `amorcer_rencontre_initiale`, puis attaque (1, échec critique
+        // automatique, pas de jet de dégâts) du gobelin qui agit ensuite
+        // (le joueur, plus rapide, agit en premier).
+        let mut de_monde = GenerateurDeSeed::nouveau(vec![10, 5, 1]);
         let resultat =
             JouerTour::executer(&mut etat, "j'observe", &mut narrateur, &mut de_joueur, &mut de_monde, &mut |_| {})
                 .unwrap();
@@ -692,13 +961,16 @@ mod tests {
         let mut etat = etat_en_combat(); // rencontre_initiale_declenchee: true (fixture)
         let pv_gobelin_avant = etat.combat_en_cours.as_ref().unwrap().ennemis[0].pv_actuels;
         let mut narrateur = NarrateurDeTest { action: ActionJoueur::ActionLibre("j'observe".into()) };
-        let mut de_joueur = GenerateurDeSeed::nouveau(vec![]);
-        // Seulement le jet d'attaque + dégâts du gobelin, qui agit après
-        // le joueur (action libre, ne consomme aucun dé). Si la rencontre
-        // se redéclenchait, `commencer_combat` consommerait deux dés
-        // d'initiative EN PLUS ici — il n'y en a aucun de programmé : un
+        // Action libre en combat => attaque improvisée avec désavantage,
+        // volontairement ratée (deux 5 => 9 < défense 12) pour ne pas
+        // affecter les PV du gobelin, seule chose vérifiée par ce test.
+        let mut de_joueur = GenerateurDeSeed::nouveau(vec![5, 5]);
+        // Puis le gobelin agit (joueur plus rapide par défaut) : d20=1 =>
+        // échec critique automatique, pas de jet de dégâts. Si la
+        // rencontre se redéclenchait, `commencer_combat` consommerait deux
+        // dés d'initiative supplémentaires ici, qu'il n'y a pas — un
         // déclenchement en trop ferait paniquer `GenerateurDeSeed`.
-        let mut de_monde = GenerateurDeSeed::nouveau(vec![1, 1]);
+        let mut de_monde = GenerateurDeSeed::nouveau(vec![1]);
         JouerTour::executer(&mut etat, "j'observe", &mut narrateur, &mut de_joueur, &mut de_monde, &mut |_| {}).unwrap();
 
         assert_eq!(etat.combat_en_cours.as_ref().unwrap().ennemis[0].pv_actuels, pv_gobelin_avant);
@@ -934,10 +1206,10 @@ mod tests {
             action: ActionJoueur::Attaquer { cible: "Gobelin".into() },
             contexte_resultat_recu: RefCell::new(None),
         };
-        // attaque: d20=10 + mod_dex(14)=2 => 12 >= defense 12 (touché) ; dégâts d4=3 (mains nues)
-        // le gobelin (7 pv) survit, donc il agit ensuite : d20=1 + bonus_attaque 3 = 4 < défense 12 (manqué)
+        // attaque: d20=10 + mod_dex(2) + maîtrise(2) => 14 >= defense 12 (touché) ; dégâts d4=3 (mains nues)
+        // le gobelin (7 pv) survit, donc il agit ensuite : d20=1 => échec critique automatique, pas de dégâts
         let mut de_joueur = GenerateurDeSeed::nouveau(vec![10, 3]);
-        let mut de_monde = GenerateurDeSeed::nouveau(vec![1, 1]);
+        let mut de_monde = GenerateurDeSeed::nouveau(vec![1]);
         JouerTour::executer(&mut etat, "j'attaque le gobelin", &mut narrateur, &mut de_joueur, &mut de_monde, &mut |_| {}).unwrap();
 
         let contexte_recu = narrateur.contexte_resultat_recu.borrow();
@@ -1040,10 +1312,10 @@ mod tests {
                 nouvelle_description: Some("forgeron bourru".to_string()),
             })),
         };
-        // attaque: d20=10 + mod_dex(14)=2 => 12 >= defense 12 (touché) ; dégâts d4=3
-        // le gobelin (7 pv) survit, il agit ensuite : d20=1 + bonus_attaque 3 = 4 < défense 12 (manqué)
+        // attaque: d20=10 + mod_dex(2) + maîtrise(2) => 14 >= defense 12 (touché) ; dégâts d4=3
+        // le gobelin (7 pv) survit, il agit ensuite : d20=1 => échec critique automatique
         let mut de_joueur = GenerateurDeSeed::nouveau(vec![10, 3]);
-        let mut de_monde = GenerateurDeSeed::nouveau(vec![1, 1]);
+        let mut de_monde = GenerateurDeSeed::nouveau(vec![1]);
         JouerTour::executer(&mut etat, "j'attaque le gobelin", &mut narrateur, &mut de_joueur, &mut de_monde, &mut |_| {}).unwrap();
 
         assert!(etat.pnj_connus.is_empty());

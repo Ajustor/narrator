@@ -20,12 +20,13 @@ pub fn construire_prompt_classification(contexte: &ContexteTour) -> String {
          {}\
          Le joueur dit : \"{}\"\n\
          Réponds uniquement par un objet JSON décrivant l'action correspondante, \
-         sans aucun autre texte. Utilise exactement un de ces quatre formats, \
+         sans aucun autre texte. Utilise exactement un de ces cinq formats, \
          avec ces clés exactes (remplace seulement la valeur après les deux-points \
          pour \"cible\"/\"objet\") :\n\
          {{\"action\": \"attaquer\", \"cible\": \"NomDeLEnnemi\"}}\n\
          {{\"action\": \"utiliser_objet\", \"objet\": \"NomDeLObjet\"}}\n\
          {{\"action\": \"fuir\"}}\n\
+         {{\"action\": \"esquiver\"}}\n\
          {{\"action\": \"libre\"}}",
         contexte.etat.lieu_actuel,
         description_combat(&contexte.etat),
@@ -210,7 +211,9 @@ mod tests {
         let mut etat = etat_sans_combat();
         etat.combat_en_cours = Some(Combat {
             ennemis: vec![Ennemi::nouveau("Gobelin".into(), 7, De { faces: 6 }, 12, 2, 3)],
-            ennemi_agit_avant_joueur: false,
+            initiative_joueur: 10,
+            initiatives_ennemis: vec![0],
+            joueur_esquive: false,
             tour_actuel: 0,
             termine: false,
             vainqueur: None,
@@ -313,6 +316,7 @@ mod tests {
         assert!(prompt.contains(r#"{"action": "attaquer", "cible": "NomDeLEnnemi"}"#));
         assert!(prompt.contains(r#"{"action": "utiliser_objet", "objet": "NomDeLObjet"}"#));
         assert!(prompt.contains(r#"{"action": "fuir"}"#));
+        assert!(prompt.contains(r#"{"action": "esquiver"}"#));
         assert!(prompt.contains(r#"{"action": "libre"}"#));
     }
 

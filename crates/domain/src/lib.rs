@@ -10,7 +10,7 @@ mod personnage;
 
 pub use action_joueur::ActionJoueur;
 pub use caracteristiques::{modificateur, Caracteristiques};
-pub use combat::{attaque_touche, determiner_ordre_initiative, resoudre_attaque, Combat, ResolutionAttaque, Vainqueur};
+pub use combat::{attaque_touche, evaluer_jet_attaque, Acteur, Combat, ResultatJetAttaque, Vainqueur, BONUS_MAITRISE};
 pub use de::{De, JetDe};
 pub use ennemi::Ennemi;
 pub use etat_partie::EtatPartie;

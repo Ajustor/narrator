@@ -293,7 +293,9 @@ mod tests {
         let mut etat = etat_sans_rien();
         etat.combat_en_cours = Some(Combat {
             ennemis: vec![Ennemi::nouveau("Gobelin".into(), 7, De { faces: 6 }, 12, 2, 3)],
-            ennemi_agit_avant_joueur: false,
+            initiative_joueur: 10,
+            initiatives_ennemis: vec![0],
+            joueur_esquive: false,
             tour_actuel: 0,
             termine: false,
             vainqueur: None,
@@ -317,7 +319,9 @@ mod tests {
                 Ennemi::nouveau("Gobelin".into(), 7, De { faces: 6 }, 12, 2, 3),
                 Ennemi::nouveau("Loup".into(), 5, De { faces: 4 }, 11, 3, 2),
             ],
-            ennemi_agit_avant_joueur: false,
+            initiative_joueur: 10,
+            initiatives_ennemis: vec![0, 0],
+            joueur_esquive: false,
             tour_actuel: 0,
             termine: false,
             vainqueur: None,

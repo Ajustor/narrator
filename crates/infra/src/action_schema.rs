@@ -69,6 +69,13 @@ pub fn construire_schema_action(etat: &EtatPartie) -> Value {
             },
             "required": ["action"]
         }));
+        variantes.push(serde_json::json!({
+            "type": "object",
+            "properties": {
+                "action": {"const": "esquiver"}
+            },
+            "required": ["action"]
+        }));
     }
 
     serde_json::json!({ "oneOf": variantes })
@@ -104,6 +111,7 @@ pub fn interpreter_json_action(json_brut: &str) -> Result<domain::ActionJoueur, 
             Ok(ActionJoueur::UtiliserObjet { objet: objet.to_string() })
         }
         "fuir" => Ok(ActionJoueur::Fuir),
+        "esquiver" => Ok(ActionJoueur::Esquiver),
         "libre" => {
             let texte = valeur.get("texte").and_then(Value::as_str).unwrap_or("").to_string();
             Ok(ActionJoueur::ActionLibre(texte))
@@ -150,7 +158,9 @@ mod tests {
         let mut etat = etat_sans_rien();
         etat.combat_en_cours = Some(Combat {
             ennemis: vec![Ennemi::nouveau("Gobelin".into(), 7, De { faces: 6 }, 12, 2, 3)],
-            ennemi_agit_avant_joueur: false,
+            initiative_joueur: 10,
+            initiatives_ennemis: vec![0],
+            joueur_esquive: false,
             tour_actuel: 0,
             termine: false,
             vainqueur: None,
@@ -172,7 +182,9 @@ mod tests {
         gobelin.subir_degats(100);
         etat.combat_en_cours = Some(Combat {
             ennemis: vec![gobelin],
-            ennemi_agit_avant_joueur: false,
+            initiative_joueur: 10,
+            initiatives_ennemis: vec![0],
+            joueur_esquive: false,
             tour_actuel: 0,
             termine: false,
             vainqueur: None,
@@ -206,11 +218,47 @@ mod tests {
     }
 
     #[test]
+    fn un_combat_actif_ajoute_la_variante_esquiver() {
+        let mut etat = etat_sans_rien();
+        etat.combat_en_cours = Some(Combat {
+            ennemis: vec![Ennemi::nouveau("Gobelin".into(), 7, De { faces: 6 }, 12, 2, 3)],
+            initiative_joueur: 10,
+            initiatives_ennemis: vec![0],
+            tour_actuel: 0,
+            termine: false,
+            vainqueur: None,
+            joueur_esquive: false,
+        });
+        let schema = construire_schema_action(&etat);
+        let variantes = schema["oneOf"].as_array().unwrap();
+        assert!(variantes.iter().any(|v| v["properties"]["action"]["const"] == "esquiver"));
+    }
+
+    #[test]
+    fn un_combat_termine_n_ajoute_pas_la_variante_esquiver() {
+        let mut etat = etat_sans_rien();
+        etat.combat_en_cours = Some(Combat {
+            ennemis: vec![Ennemi::nouveau("Gobelin".into(), 7, De { faces: 6 }, 12, 2, 3)],
+            initiative_joueur: 10,
+            initiatives_ennemis: vec![0],
+            tour_actuel: 0,
+            termine: true,
+            vainqueur: Some(domain::Vainqueur::Joueur),
+            joueur_esquive: false,
+        });
+        let schema = construire_schema_action(&etat);
+        let variantes = schema["oneOf"].as_array().unwrap();
+        assert!(variantes.iter().all(|v| v["properties"]["action"]["const"] != "esquiver"));
+    }
+
+    #[test]
     fn un_combat_actif_ajoute_la_variante_fuir() {
         let mut etat = etat_sans_rien();
         etat.combat_en_cours = Some(Combat {
             ennemis: vec![Ennemi::nouveau("Gobelin".into(), 7, De { faces: 6 }, 12, 2, 3)],
-            ennemi_agit_avant_joueur: false,
+            initiative_joueur: 10,
+            initiatives_ennemis: vec![0],
+            joueur_esquive: false,
             tour_actuel: 0,
             termine: false,
             vainqueur: None,
@@ -225,7 +273,9 @@ mod tests {
         let mut etat = etat_sans_rien();
         etat.combat_en_cours = Some(Combat {
             ennemis: vec![Ennemi::nouveau("Gobelin".into(), 7, De { faces: 6 }, 12, 2, 3)],
-            ennemi_agit_avant_joueur: false,
+            initiative_joueur: 10,
+            initiatives_ennemis: vec![0],
+            joueur_esquive: false,
             tour_actuel: 0,
             termine: true,
             vainqueur: Some(domain::Vainqueur::Joueur),
@@ -251,6 +301,12 @@ mod tests {
     fn interprete_une_fuite() {
         let action = interpreter_json_action(r#"{"action":"fuir"}"#).unwrap();
         assert_eq!(action, ActionJoueur::Fuir);
+    }
+
+    #[test]
+    fn interprete_une_esquive() {
+        let action = interpreter_json_action(r#"{"action":"esquiver"}"#).unwrap();
+        assert_eq!(action, ActionJoueur::Esquiver);
     }
 
     #[test]

@@ -1,5 +1,5 @@
 use crate::ports::generateur_de::GenerateurDe;
-use domain::{determiner_ordre_initiative, modificateur, Combat, De, Ennemi, Personnage};
+use domain::{modificateur, Combat, De, Ennemi, Personnage};
 
 pub fn commencer_combat(
     personnage: &Personnage,
@@ -14,14 +14,14 @@ pub fn commencer_combat(
         .map(|e| de.lancer(De { faces: 20 }, e.bonus_initiative).total)
         .collect();
 
-    let ennemi_agit_avant_joueur = determiner_ordre_initiative(initiative_joueur, &initiatives_ennemis);
-
     Combat {
         ennemis,
-        ennemi_agit_avant_joueur,
+        initiative_joueur,
+        initiatives_ennemis,
         tour_actuel: 0,
         termine: false,
         vainqueur: None,
+        joueur_esquive: false,
     }
 }
 
@@ -29,7 +29,7 @@ pub fn commencer_combat(
 mod tests {
     use super::*;
     use crate::ports::generateur_de::GenerateurDeSeed;
-    use domain::Caracteristiques;
+    use domain::{Acteur, Caracteristiques};
 
     fn perso_dex_14() -> Personnage {
         Personnage::nouveau(
@@ -57,7 +57,7 @@ mod tests {
         // gobelin: 5 + bonus_initiative 2 => total 7
         let mut de = GenerateurDeSeed::nouveau(vec![10, 5]);
         let combat = commencer_combat(&perso_dex_14(), vec![gobelin()], &mut de);
-        assert!(!combat.ennemi_agit_avant_joueur);
+        assert_eq!(combat.ordre_de_tour(), vec![Acteur::Joueur, Acteur::Ennemi(0)]);
         assert_eq!(combat.ennemis.len(), 1);
         assert!(!combat.termine);
     }
@@ -68,6 +68,6 @@ mod tests {
         // gobelin: 15 + 2 = 17
         let mut de = GenerateurDeSeed::nouveau(vec![3, 15]);
         let combat = commencer_combat(&perso_dex_14(), vec![gobelin()], &mut de);
-        assert!(combat.ennemi_agit_avant_joueur);
+        assert_eq!(combat.ordre_de_tour(), vec![Acteur::Ennemi(0), Acteur::Joueur]);
     }
 }

@@ -117,7 +117,9 @@ mod tests {
     fn combat_avec_gobelin() -> Combat {
         Combat {
             ennemis: vec![Ennemi::nouveau("Gobelin".into(), 7, De { faces: 6 }, 12, 2, 3)],
-            ennemi_agit_avant_joueur: false,
+            initiative_joueur: 10,
+            initiatives_ennemis: vec![0],
+            joueur_esquive: false,
             tour_actuel: 0,
             termine: false,
             vainqueur: None,
