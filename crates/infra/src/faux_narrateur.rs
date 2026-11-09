@@ -108,6 +108,7 @@ mod tests {
                 combat_en_cours: combat,
                 resumes: vec![],
                 pnj_connus: vec![],
+                rencontre_initiale_declenchee: true,
             },
             saisie_joueur: saisie.to_string(),
         }

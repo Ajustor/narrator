@@ -70,6 +70,28 @@ pub fn retirer(repertoire_sauvegardes: &Path, id: &str) -> std::io::Result<()> {
     ecrire_index(repertoire_sauvegardes, &histoires)
 }
 
+/// Supprime une histoire entièrement : son fichier de sauvegarde ET son
+/// entrée dans l'index — utilisé pour la suppression manuelle depuis
+/// l'écran de sélection (le retrait automatique à la mort du personnage,
+/// dans `worker::traiter_message`, fait les deux mêmes étapes séparément,
+/// car il a déjà le chemin de sauvegarde sous la main).
+///
+/// Le fichier peut déjà être absent (entrée fantôme) — on ignore cette
+/// erreur précise et on retire tout de même l'entrée de l'index. Pour
+/// toute autre erreur de suppression du fichier, on s'arrête sans toucher
+/// à l'index : mieux vaut une entrée qu'on peut retenter de supprimer
+/// qu'une entrée fantôme pointant vers un fichier qui existe peut-être
+/// encore.
+pub fn supprimer(repertoire_sauvegardes: &Path, id: &str) -> std::io::Result<()> {
+    let chemin = chemin_sauvegarde(repertoire_sauvegardes, id);
+    if let Err(erreur) = std::fs::remove_file(&chemin) {
+        if erreur.kind() != std::io::ErrorKind::NotFound {
+            return Err(erreur);
+        }
+    }
+    retirer(repertoire_sauvegardes, id)
+}
+
 /// Écrit l'index de façon atomique : contenu complet dans un `.tmp` puis
 /// renommage vers `index.json`, même principe que `telechargement.rs`. Un
 /// arrêt en plein milieu de l'écriture ne peut ainsi jamais laisser
@@ -138,6 +160,37 @@ mod tests {
         let histoires = lister(&repertoire);
         assert_eq!(histoires.len(), 1, "l'autre histoire ne doit pas disparaître");
         assert_eq!(histoires[0].id, "thorn-def456");
+        let _ = std::fs::remove_dir_all(&repertoire);
+    }
+
+    #[test]
+    fn supprimer_enleve_le_fichier_et_l_entree_d_index() {
+        let repertoire = repertoire_temporaire("suppression");
+        ajouter(&repertoire, entree_test("elowen-abc123", "Elowen")).unwrap();
+        ajouter(&repertoire, entree_test("thorn-def456", "Thorn")).unwrap();
+        std::fs::write(chemin_sauvegarde(&repertoire, "elowen-abc123"), "contenu factice").unwrap();
+
+        supprimer(&repertoire, "elowen-abc123").unwrap();
+
+        let histoires = lister(&repertoire);
+        assert_eq!(histoires.len(), 1, "l'autre histoire ne doit pas disparaître");
+        assert_eq!(histoires[0].id, "thorn-def456");
+        assert!(
+            !chemin_sauvegarde(&repertoire, "elowen-abc123").exists(),
+            "le fichier de sauvegarde doit avoir été supprimé"
+        );
+        let _ = std::fs::remove_dir_all(&repertoire);
+    }
+
+    #[test]
+    fn supprimer_retire_quand_meme_l_entree_d_index_si_le_fichier_est_deja_absent() {
+        let repertoire = repertoire_temporaire("suppression_fantome");
+        ajouter(&repertoire, entree_test("elowen-abc123", "Elowen")).unwrap();
+        // Pas de fichier de sauvegarde écrit : entrée fantôme.
+
+        supprimer(&repertoire, "elowen-abc123").unwrap();
+
+        assert_eq!(lister(&repertoire), Vec::new());
         let _ = std::fs::remove_dir_all(&repertoire);
     }
 

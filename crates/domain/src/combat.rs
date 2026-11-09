@@ -39,8 +39,16 @@ pub struct ResolutionAttaque {
     pub degats: i32,
 }
 
+/// Séparé de `resoudre_attaque` pour qu'un appelant puisse savoir si un
+/// jet de dégâts est nécessaire AVANT de le lancer (ex. le lancer manuel
+/// du joueur dans `app_desktop` : inutile de lui demander un jet de
+/// dégâts s'il vient de rater son attaque).
+pub fn attaque_touche(attaque_totale: i32, defense_cible: i32) -> bool {
+    attaque_totale >= defense_cible
+}
+
 pub fn resoudre_attaque(attaque_totale: i32, defense_cible: i32, jet_degats: JetDe) -> ResolutionAttaque {
-    let touche = attaque_totale >= defense_cible;
+    let touche = attaque_touche(attaque_totale, defense_cible);
     let degats = if touche { jet_degats.total.max(0) } else { 0 };
     ResolutionAttaque { touche, degats }
 }

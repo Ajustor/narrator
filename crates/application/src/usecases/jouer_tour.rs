@@ -1,6 +1,7 @@
 use crate::ports::generateur_de::GenerateurDe;
 use crate::ports::narrateur::{ContexteResultat, ContexteTour, ErreurNarrateur, Narrateur};
-use domain::{resoudre_attaque, ActionJoueur, De, EffetObjet, EtatPartie, FichePnj, Vainqueur};
+use crate::usecases::commencer_combat::commencer_combat;
+use domain::{resoudre_attaque, ActionJoueur, De, EffetObjet, Ennemi, EtatPartie, FichePnj, Vainqueur};
 
 // SEUIL_MOTS_RESUMES est choisi pour rester largement sous TAILLE_CONTEXTE
 // (4096 tokens, dans infra::llama_narrateur) une fois converti en tokens —
@@ -65,12 +66,19 @@ pub fn resoudre_action_joueur(
             let modificateur_dex = domain::modificateur(etat.personnage.caracteristiques.dexterite);
             let jet_attaque = de.lancer(De { faces: 20 }, modificateur_dex);
             let arme = etat.personnage.arme_equipee();
-            let jet_degats = de.lancer(arme, 0);
 
             if let Some(combat) = etat.combat_en_cours.as_mut() {
                 if let Some(ennemi) = combat.trouver_ennemi_vivant_mut(cible) {
-                    let resolution = resoudre_attaque(jet_attaque.total, ennemi.defense, jet_degats);
-                    if resolution.touche {
+                    // Le jet de dégâts n'est lancé que si l'attaque touche
+                    // réellement : avec un dé automatique ça ne changeait
+                    // rien (lancé dans tous les cas puis ignoré en cas de
+                    // raté), mais avec le dé du joueur (voir `de`, qui peut
+                    // maintenant attendre une action du joueur), lui
+                    // demander un jet de dégâts pour une attaque déjà
+                    // ratée n'aurait aucun sens.
+                    if domain::attaque_touche(jet_attaque.total, ennemi.defense) {
+                        let jet_degats = de.lancer(arme, 0);
+                        let resolution = resoudre_attaque(jet_attaque.total, ennemi.defense, jet_degats);
                         ennemi.subir_degats(resolution.degats);
                         resume.push(format!(
                             "🎲 Tu attaques {} : {} vs défense {} — touché ! Dégâts : {}",
@@ -155,6 +163,32 @@ pub fn resoudre_action_ennemis(etat: &mut EtatPartie, de: &mut dyn GenerateurDe)
 
 fn combat_termine(etat: &EtatPartie) -> bool {
     etat.combat_en_cours.as_ref().map(|c| c.termine).unwrap_or(true)
+}
+
+/// Déclenche la toute première rencontre d'une histoire (le Gobelin de la
+/// clairière) si elle ne l'a pas encore été — appelé en tout début de
+/// `JouerTour::executer`, avant même de classifier l'action du joueur.
+///
+/// Sans ça, le combat devrait être lancé par l'appelant dès la création du
+/// personnage (comportement précédent) : le panneau de combat apparaissait
+/// alors instantanément, avant même que le joueur ait fait quoi que ce
+/// soit, en même temps que la scène d'ouverture. En le déclenchant ici à
+/// la place, au tout premier tour réel, le joueur voit d'abord
+/// l'exploration pure (l'intro) puis entre en combat seulement quand il
+/// agit — et comme `etat` (donc `combat_en_cours`) est mis à jour avant de
+/// construire le `ContexteTour` de classification, le narrateur voit déjà
+/// le Gobelin et peut correctement classifier un premier message du type
+/// "j'attaque" en `Attaquer`, sans quoi `valider_action` le rejetterait
+/// (pas de combat en cours à ce moment-là).
+fn amorcer_rencontre_initiale(etat: &mut EtatPartie, de_monde: &mut dyn GenerateurDe, resume: &mut Vec<String>) {
+    if etat.rencontre_initiale_declenchee {
+        return;
+    }
+    let gobelin = Ennemi::nouveau("Gobelin".to_string(), 7, De { faces: 6 }, 12, 2, 3);
+    let combat = commencer_combat(&etat.personnage, vec![gobelin], de_monde);
+    etat.combat_en_cours = Some(combat);
+    etat.rencontre_initiale_declenchee = true;
+    resume.push("⚔️ Un Gobelin surgit et t'attaque !".to_string());
 }
 
 fn terminer_si_ennemis_morts(etat: &mut EtatPartie) {
@@ -244,13 +278,24 @@ fn enregistrer_pnj_si_pertinent(etat: &mut EtatPartie, narration: &str, narrateu
 pub struct JouerTour;
 
 impl JouerTour {
+    /// `de_joueur` lance uniquement les dés qui appartiennent au joueur
+    /// (son jet d'attaque, son jet de dégâts) ; `de_monde` lance tout le
+    /// reste (initiative des deux camps, jets des ennemis, et la
+    /// rencontre initiale). Les séparer permet à l'appelant de brancher
+    /// `de_joueur` sur un générateur qui attend une action du joueur (ex.
+    /// un dé virtuel à l'écran dans `app_desktop`) sans jamais faire
+    /// attendre le joueur pour un jet qui n'est pas le sien.
     pub fn executer(
         etat: &mut EtatPartie,
         saisie: &str,
         narrateur: &mut dyn Narrateur,
-        de: &mut dyn GenerateurDe,
+        de_joueur: &mut dyn GenerateurDe,
+        de_monde: &mut dyn GenerateurDe,
         sur_fragment: &mut dyn FnMut(&str),
     ) -> Result<ResultatTour, ErreurTour> {
+        let mut resume = Vec::new();
+        amorcer_rencontre_initiale(etat, de_monde, &mut resume);
+
         let contexte_tour = ContexteTour {
             etat: etat.clone(),
             saisie_joueur: saisie.to_string(),
@@ -265,11 +310,10 @@ impl JouerTour {
             combat.tour_actuel += 1;
         }
 
-        let mut resume = Vec::new();
         let fuite = matches!(action_proposee, ActionJoueur::Fuir);
 
         if fuite {
-            resume.extend(resoudre_action_joueur(etat, &action_proposee, de));
+            resume.extend(resoudre_action_joueur(etat, &action_proposee, de_joueur));
         } else {
             let ennemi_avant = etat
                 .combat_en_cours
@@ -278,17 +322,17 @@ impl JouerTour {
                 .unwrap_or(false);
 
             if ennemi_avant {
-                resume.extend(resoudre_action_ennemis(etat, de));
+                resume.extend(resoudre_action_ennemis(etat, de_monde));
                 terminer_si_joueur_mort(etat);
                 if !combat_termine(etat) {
-                    resume.extend(resoudre_action_joueur(etat, &action_proposee, de));
+                    resume.extend(resoudre_action_joueur(etat, &action_proposee, de_joueur));
                     terminer_si_ennemis_morts(etat);
                 }
             } else {
-                resume.extend(resoudre_action_joueur(etat, &action_proposee, de));
+                resume.extend(resoudre_action_joueur(etat, &action_proposee, de_joueur));
                 terminer_si_ennemis_morts(etat);
                 if !combat_termine(etat) {
-                    resume.extend(resoudre_action_ennemis(etat, de));
+                    resume.extend(resoudre_action_ennemis(etat, de_monde));
                     terminer_si_joueur_mort(etat);
                 }
             }
@@ -342,6 +386,7 @@ mod tests {
             combat_en_cours: None,
             resumes: vec![],
             pnj_connus: vec![],
+            rencontre_initiale_declenchee: true,
         }
     }
 
@@ -440,6 +485,21 @@ mod tests {
     }
 
     #[test]
+    fn attaquer_qui_rate_ne_lance_jamais_le_de_de_degats() {
+        // Un seul résultat programmé (le jet d'attaque) : si le code
+        // tentait quand même de lancer les dégâts après un raté, ce
+        // deuxième `.lancer()` ferait paniquer `GenerateurDeSeed`
+        // ("plus de résultats programmés") — avec un dé réel automatique
+        // ça ne changeait rien (lancé puis ignoré), mais avec le dé du
+        // joueur (voir `worker::GenerateurDeJoueur`), ça lui demanderait un
+        // jet de dégâts pour une attaque déjà ratée.
+        let mut etat = etat_en_combat();
+        let mut de = GenerateurDeSeed::nouveau(vec![5]); // d20=5 + mod_dex(14)=2 => 7 < défense 12 (manqué)
+        let resume = resoudre_action_joueur(&mut etat, &ActionJoueur::Attaquer { cible: "Gobelin".into() }, &mut de);
+        assert!(resume[0].contains("manqué"));
+    }
+
+    #[test]
     fn utiliser_objet_soigne_et_retire_l_objet_de_l_inventaire() {
         let mut etat = etat_sans_combat();
         etat.personnage.subir_degats(5);
@@ -532,8 +592,9 @@ mod tests {
         etat.combat_en_cours.as_mut().unwrap().ennemis[0].pv_actuels = 1;
         let mut narrateur = NarrateurDeTest { action: ActionJoueur::Attaquer { cible: "Gobelin".into() } };
         // attaque: d20=10 + mod_dex(14)=2 => 12 >= defense 12 (touché) ; dégâts d4=3 (mains nues, tue le gobelin à 1 pv)
-        let mut de = GenerateurDeSeed::nouveau(vec![10, 3]);
-        let resultat = JouerTour::executer(&mut etat, "j'attaque le gobelin", &mut narrateur, &mut de, &mut |_| {}).unwrap();
+        let mut de_joueur = GenerateurDeSeed::nouveau(vec![10, 3]);
+        let mut de_monde = GenerateurDeSeed::nouveau(vec![]);
+        let resultat = JouerTour::executer(&mut etat, "j'attaque le gobelin", &mut narrateur, &mut de_joueur, &mut de_monde, &mut |_| {}).unwrap();
         assert_eq!(resultat.vainqueur_combat, Some(Vainqueur::Joueur));
         assert!(!resultat.partie_terminee, "une victoire ne doit pas terminer la partie");
         assert!(etat.combat_en_cours.is_none(), "le combat gagné doit laisser la place à l'exploration");
@@ -543,8 +604,9 @@ mod tests {
     fn jouer_tour_fuite_reussie_revient_en_exploration() {
         let mut etat = etat_en_combat();
         let mut narrateur = NarrateurDeTest { action: ActionJoueur::Fuir };
-        let mut de = GenerateurDeSeed::nouveau(vec![]);
-        let resultat = JouerTour::executer(&mut etat, "je fuis", &mut narrateur, &mut de, &mut |_| {}).unwrap();
+        let mut de_joueur = GenerateurDeSeed::nouveau(vec![]);
+        let mut de_monde = GenerateurDeSeed::nouveau(vec![]);
+        let resultat = JouerTour::executer(&mut etat, "je fuis", &mut narrateur, &mut de_joueur, &mut de_monde, &mut |_| {}).unwrap();
         assert_eq!(resultat.vainqueur_combat, Some(Vainqueur::Fuite));
         assert!(!resultat.partie_terminee, "une fuite réussie ne doit pas terminer la partie");
         assert!(etat.combat_en_cours.is_none(), "la fuite doit laisser la place à l'exploration");
@@ -560,8 +622,9 @@ mod tests {
         // (jet d'attaque + jet de dégâts) — déjà sans effet, le joueur
         // étant déjà à 0 PV, mais `resoudre_action_ennemis` consomme ces
         // deux dés avant même de vérifier la mort.
-        let mut de = GenerateurDeSeed::nouveau(vec![10, 4]);
-        let resultat = JouerTour::executer(&mut etat, "j'observe", &mut narrateur, &mut de, &mut |_| {}).unwrap();
+        let mut de_joueur = GenerateurDeSeed::nouveau(vec![]);
+        let mut de_monde = GenerateurDeSeed::nouveau(vec![10, 4]);
+        let resultat = JouerTour::executer(&mut etat, "j'observe", &mut narrateur, &mut de_joueur, &mut de_monde, &mut |_| {}).unwrap();
         assert_eq!(resultat.vainqueur_combat, Some(Vainqueur::Ennemis));
         assert!(resultat.partie_terminee, "la mort du joueur doit terminer la partie");
         assert!(
@@ -576,8 +639,9 @@ mod tests {
         etat.combat_en_cours.as_mut().unwrap().ennemi_agit_avant_joueur = true;
         let mut narrateur = NarrateurDeTest { action: ActionJoueur::ActionLibre("j'observe".into()) };
         // ennemi: d20=10 + bonus_attaque 3 = 13 >= defense joueur 12 (touché) ; dégâts d6=4
-        let mut de = GenerateurDeSeed::nouveau(vec![10, 4]);
-        let resultat = JouerTour::executer(&mut etat, "j'observe", &mut narrateur, &mut de, &mut |_| {}).unwrap();
+        let mut de_joueur = GenerateurDeSeed::nouveau(vec![]);
+        let mut de_monde = GenerateurDeSeed::nouveau(vec![10, 4]);
+        let resultat = JouerTour::executer(&mut etat, "j'observe", &mut narrateur, &mut de_joueur, &mut de_monde, &mut |_| {}).unwrap();
         assert_eq!(etat.personnage.pv_actuels, etat.personnage.pv_max - 4);
         assert_eq!(resultat.vainqueur_combat, None);
     }
@@ -586,8 +650,9 @@ mod tests {
     fn jouer_tour_hors_combat_ne_signale_jamais_de_vainqueur() {
         let mut etat = etat_sans_combat();
         let mut narrateur = NarrateurDeTest { action: ActionJoueur::ActionLibre("j'observe".into()) };
-        let mut de = GenerateurDeSeed::nouveau(vec![]);
-        let resultat = JouerTour::executer(&mut etat, "j'observe", &mut narrateur, &mut de, &mut |_| {}).unwrap();
+        let mut de_joueur = GenerateurDeSeed::nouveau(vec![]);
+        let mut de_monde = GenerateurDeSeed::nouveau(vec![]);
+        let resultat = JouerTour::executer(&mut etat, "j'observe", &mut narrateur, &mut de_joueur, &mut de_monde, &mut |_| {}).unwrap();
         assert_eq!(resultat.vainqueur_combat, None);
         assert!(!resultat.partie_terminee);
     }
@@ -596,9 +661,47 @@ mod tests {
     fn jouer_tour_rejette_une_action_invalide_sans_consommer_de_de() {
         let mut etat = etat_sans_combat();
         let mut narrateur = NarrateurDeTest { action: ActionJoueur::Attaquer { cible: "Gobelin".into() } };
-        let mut de = GenerateurDeSeed::nouveau(vec![]);
-        let resultat = JouerTour::executer(&mut etat, "j'attaque", &mut narrateur, &mut de, &mut |_| {});
+        let mut de_joueur = GenerateurDeSeed::nouveau(vec![]);
+        let mut de_monde = GenerateurDeSeed::nouveau(vec![]);
+        let resultat = JouerTour::executer(&mut etat, "j'attaque", &mut narrateur, &mut de_joueur, &mut de_monde, &mut |_| {});
         assert!(matches!(resultat, Err(ErreurTour::AucunCombatEnCours)));
+    }
+
+    #[test]
+    fn jouer_tour_declenche_la_rencontre_initiale_au_tout_premier_tour() {
+        let mut etat = etat_sans_combat();
+        etat.rencontre_initiale_declenchee = false;
+        let mut narrateur = NarrateurDeTest { action: ActionJoueur::ActionLibre("j'observe".into()) };
+        let mut de_joueur = GenerateurDeSeed::nouveau(vec![]);
+        // de_monde : initiative joueur (10), initiative gobelin (5) pour
+        // `amorcer_rencontre_initiale`, puis attaque (1) + dégâts (1) du
+        // gobelin qui agit ensuite (le joueur, plus rapide, agit en
+        // premier avec une action libre qui ne consomme aucun dé).
+        let mut de_monde = GenerateurDeSeed::nouveau(vec![10, 5, 1, 1]);
+        let resultat =
+            JouerTour::executer(&mut etat, "j'observe", &mut narrateur, &mut de_joueur, &mut de_monde, &mut |_| {})
+                .unwrap();
+
+        assert!(etat.combat_en_cours.is_some(), "la rencontre doit démarrer dès le premier tour");
+        assert!(etat.rencontre_initiale_declenchee);
+        assert!(resultat.resume_mecanique.iter().any(|l| l.contains("Gobelin")));
+    }
+
+    #[test]
+    fn jouer_tour_ne_redeclenche_pas_la_rencontre_si_deja_amorcee() {
+        let mut etat = etat_en_combat(); // rencontre_initiale_declenchee: true (fixture)
+        let pv_gobelin_avant = etat.combat_en_cours.as_ref().unwrap().ennemis[0].pv_actuels;
+        let mut narrateur = NarrateurDeTest { action: ActionJoueur::ActionLibre("j'observe".into()) };
+        let mut de_joueur = GenerateurDeSeed::nouveau(vec![]);
+        // Seulement le jet d'attaque + dégâts du gobelin, qui agit après
+        // le joueur (action libre, ne consomme aucun dé). Si la rencontre
+        // se redéclenchait, `commencer_combat` consommerait deux dés
+        // d'initiative EN PLUS ici — il n'y en a aucun de programmé : un
+        // déclenchement en trop ferait paniquer `GenerateurDeSeed`.
+        let mut de_monde = GenerateurDeSeed::nouveau(vec![1, 1]);
+        JouerTour::executer(&mut etat, "j'observe", &mut narrateur, &mut de_joueur, &mut de_monde, &mut |_| {}).unwrap();
+
+        assert_eq!(etat.combat_en_cours.as_ref().unwrap().ennemis[0].pv_actuels, pv_gobelin_avant);
     }
 
     use std::cell::RefCell;
@@ -730,8 +833,9 @@ mod tests {
     fn jouer_tour_ajoute_la_narration_aux_resumes() {
         let mut etat = etat_sans_combat();
         let mut narrateur = NarrateurDeTest { action: ActionJoueur::ActionLibre("j'observe".into()) };
-        let mut de = GenerateurDeSeed::nouveau(vec![]);
-        JouerTour::executer(&mut etat, "j'observe", &mut narrateur, &mut de, &mut |_| {}).unwrap();
+        let mut de_joueur = GenerateurDeSeed::nouveau(vec![]);
+        let mut de_monde = GenerateurDeSeed::nouveau(vec![]);
+        JouerTour::executer(&mut etat, "j'observe", &mut narrateur, &mut de_joueur, &mut de_monde, &mut |_| {}).unwrap();
         assert_eq!(etat.resumes, vec!["narration de test".to_string()]);
     }
 
@@ -743,8 +847,9 @@ mod tests {
             resultat: Ok("résumé condensé".to_string()),
             anciens_recus: RefCell::new(None),
         };
-        let mut de = GenerateurDeSeed::nouveau(vec![]);
-        JouerTour::executer(&mut etat, "j'observe", &mut narrateur, &mut de, &mut |_| {}).unwrap();
+        let mut de_joueur = GenerateurDeSeed::nouveau(vec![]);
+        let mut de_monde = GenerateurDeSeed::nouveau(vec![]);
+        JouerTour::executer(&mut etat, "j'observe", &mut narrateur, &mut de_joueur, &mut de_monde, &mut |_| {}).unwrap();
 
         // 9 anciens + 1 nouvelle narration = 10 résumés avant condensation ;
         // les NB_RESUMES_RECENTS_CONSERVES=5 derniers sont gardés, les 5 plus anciens condensés.
@@ -764,8 +869,9 @@ mod tests {
             resultat: Err(ErreurNarrateur::EchecGeneration("échec simulé".into())),
             anciens_recus: RefCell::new(None),
         };
-        let mut de = GenerateurDeSeed::nouveau(vec![]);
-        let resultat = JouerTour::executer(&mut etat, "j'observe", &mut narrateur, &mut de, &mut |_| {});
+        let mut de_joueur = GenerateurDeSeed::nouveau(vec![]);
+        let mut de_monde = GenerateurDeSeed::nouveau(vec![]);
+        let resultat = JouerTour::executer(&mut etat, "j'observe", &mut narrateur, &mut de_joueur, &mut de_monde, &mut |_| {});
 
         assert!(resultat.is_ok());
         let mut resumes_attendus = resumes_avant;
@@ -782,8 +888,9 @@ mod tests {
             resultat: Ok("   ".to_string()),
             anciens_recus: RefCell::new(None),
         };
-        let mut de = GenerateurDeSeed::nouveau(vec![]);
-        JouerTour::executer(&mut etat, "j'observe", &mut narrateur, &mut de, &mut |_| {}).unwrap();
+        let mut de_joueur = GenerateurDeSeed::nouveau(vec![]);
+        let mut de_monde = GenerateurDeSeed::nouveau(vec![]);
+        JouerTour::executer(&mut etat, "j'observe", &mut narrateur, &mut de_joueur, &mut de_monde, &mut |_| {}).unwrap();
 
         let mut resumes_attendus = resumes_avant;
         resumes_attendus.push("Il ne se passe rien de notable.".to_string());
@@ -798,8 +905,9 @@ mod tests {
             resultat: Err(ErreurNarrateur::EchecGeneration("échec simulé".into())),
             anciens_recus: RefCell::new(None),
         };
-        let mut de = GenerateurDeSeed::nouveau(vec![]);
-        JouerTour::executer(&mut etat, "j'observe", &mut narrateur, &mut de, &mut |_| {}).unwrap();
+        let mut de_joueur = GenerateurDeSeed::nouveau(vec![]);
+        let mut de_monde = GenerateurDeSeed::nouveau(vec![]);
+        JouerTour::executer(&mut etat, "j'observe", &mut narrateur, &mut de_joueur, &mut de_monde, &mut |_| {}).unwrap();
 
         assert_eq!(etat.resumes.len(), NB_RESUMES_RECENTS_CONSERVES);
     }
@@ -810,8 +918,9 @@ mod tests {
         etat.resumes = (0..NB_RESUMES_RECENTS_CONSERVES + 2).map(|_| resume_de_n_mots(10)).collect();
         let resumes_avant = etat.resumes.clone();
         let mut narrateur = NarrateurDeTest { action: ActionJoueur::ActionLibre("j'observe".into()) };
-        let mut de = GenerateurDeSeed::nouveau(vec![]);
-        JouerTour::executer(&mut etat, "j'observe", &mut narrateur, &mut de, &mut |_| {}).unwrap();
+        let mut de_joueur = GenerateurDeSeed::nouveau(vec![]);
+        let mut de_monde = GenerateurDeSeed::nouveau(vec![]);
+        JouerTour::executer(&mut etat, "j'observe", &mut narrateur, &mut de_joueur, &mut de_monde, &mut |_| {}).unwrap();
 
         let mut resumes_attendus = resumes_avant;
         resumes_attendus.push("narration de test".to_string());
@@ -827,8 +936,9 @@ mod tests {
         };
         // attaque: d20=10 + mod_dex(14)=2 => 12 >= defense 12 (touché) ; dégâts d4=3 (mains nues)
         // le gobelin (7 pv) survit, donc il agit ensuite : d20=1 + bonus_attaque 3 = 4 < défense 12 (manqué)
-        let mut de = GenerateurDeSeed::nouveau(vec![10, 3, 1, 1]);
-        JouerTour::executer(&mut etat, "j'attaque le gobelin", &mut narrateur, &mut de, &mut |_| {}).unwrap();
+        let mut de_joueur = GenerateurDeSeed::nouveau(vec![10, 3]);
+        let mut de_monde = GenerateurDeSeed::nouveau(vec![1, 1]);
+        JouerTour::executer(&mut etat, "j'attaque le gobelin", &mut narrateur, &mut de_joueur, &mut de_monde, &mut |_| {}).unwrap();
 
         let contexte_recu = narrateur.contexte_resultat_recu.borrow();
         let contexte_recu = contexte_recu.as_ref().expect("raconter_resultat aurait dû être appelé");
@@ -845,8 +955,9 @@ mod tests {
                 nouvelle_description: Some("forgeron bourru et méfiant".to_string()),
             })),
         };
-        let mut de = GenerateurDeSeed::nouveau(vec![]);
-        JouerTour::executer(&mut etat, "je parle au forgeron", &mut narrateur, &mut de, &mut |_| {}).unwrap();
+        let mut de_joueur = GenerateurDeSeed::nouveau(vec![]);
+        let mut de_monde = GenerateurDeSeed::nouveau(vec![]);
+        JouerTour::executer(&mut etat, "je parle au forgeron", &mut narrateur, &mut de_joueur, &mut de_monde, &mut |_| {}).unwrap();
 
         assert_eq!(etat.pnj_connus.len(), 1);
         assert_eq!(etat.pnj_connus[0].nom, "Aldric");
@@ -865,8 +976,9 @@ mod tests {
         let mut narrateur = NarrateurDetectionPnj {
             resultat: Ok(Some(PnjDetecte { nom: "Aldric".to_string(), nouvelle_description: None })),
         };
-        let mut de = GenerateurDeSeed::nouveau(vec![]);
-        JouerTour::executer(&mut etat, "je retourne voir Aldric", &mut narrateur, &mut de, &mut |_| {}).unwrap();
+        let mut de_joueur = GenerateurDeSeed::nouveau(vec![]);
+        let mut de_monde = GenerateurDeSeed::nouveau(vec![]);
+        JouerTour::executer(&mut etat, "je retourne voir Aldric", &mut narrateur, &mut de_joueur, &mut de_monde, &mut |_| {}).unwrap();
 
         assert_eq!(etat.pnj_connus.len(), 1);
         assert_eq!(etat.pnj_connus[0].description, "forgeron bourru et méfiant");
@@ -890,8 +1002,9 @@ mod tests {
                 nouvelle_description: Some("forgeron bourru et méfiant".to_string()),
             })),
         };
-        let mut de = GenerateurDeSeed::nouveau(vec![]);
-        JouerTour::executer(&mut etat, "je retourne voir Aldric", &mut narrateur, &mut de, &mut |_| {}).unwrap();
+        let mut de_joueur = GenerateurDeSeed::nouveau(vec![]);
+        let mut de_monde = GenerateurDeSeed::nouveau(vec![]);
+        JouerTour::executer(&mut etat, "je retourne voir Aldric", &mut narrateur, &mut de_joueur, &mut de_monde, &mut |_| {}).unwrap();
 
         assert_eq!(etat.pnj_connus.len(), 1);
         assert_eq!(etat.pnj_connus[0].description, "forgeron bourru et méfiant");
@@ -911,8 +1024,9 @@ mod tests {
                 nouvelle_description: Some("autre description".to_string()),
             })),
         };
-        let mut de = GenerateurDeSeed::nouveau(vec![]);
-        JouerTour::executer(&mut etat, "je retourne voir Aldric", &mut narrateur, &mut de, &mut |_| {}).unwrap();
+        let mut de_joueur = GenerateurDeSeed::nouveau(vec![]);
+        let mut de_monde = GenerateurDeSeed::nouveau(vec![]);
+        JouerTour::executer(&mut etat, "je retourne voir Aldric", &mut narrateur, &mut de_joueur, &mut de_monde, &mut |_| {}).unwrap();
 
         assert_eq!(etat.pnj_connus[0].description, "forgeron bourru et méfiant");
     }
@@ -928,8 +1042,9 @@ mod tests {
         };
         // attaque: d20=10 + mod_dex(14)=2 => 12 >= defense 12 (touché) ; dégâts d4=3
         // le gobelin (7 pv) survit, il agit ensuite : d20=1 + bonus_attaque 3 = 4 < défense 12 (manqué)
-        let mut de = GenerateurDeSeed::nouveau(vec![10, 3, 1, 1]);
-        JouerTour::executer(&mut etat, "j'attaque le gobelin", &mut narrateur, &mut de, &mut |_| {}).unwrap();
+        let mut de_joueur = GenerateurDeSeed::nouveau(vec![10, 3]);
+        let mut de_monde = GenerateurDeSeed::nouveau(vec![1, 1]);
+        JouerTour::executer(&mut etat, "j'attaque le gobelin", &mut narrateur, &mut de_joueur, &mut de_monde, &mut |_| {}).unwrap();
 
         assert!(etat.pnj_connus.is_empty());
     }
@@ -940,8 +1055,9 @@ mod tests {
         let mut narrateur = NarrateurDetectionPnj {
             resultat: Err(ErreurNarrateur::EchecGeneration("échec simulé".into())),
         };
-        let mut de = GenerateurDeSeed::nouveau(vec![]);
-        let resultat = JouerTour::executer(&mut etat, "j'observe", &mut narrateur, &mut de, &mut |_| {});
+        let mut de_joueur = GenerateurDeSeed::nouveau(vec![]);
+        let mut de_monde = GenerateurDeSeed::nouveau(vec![]);
+        let resultat = JouerTour::executer(&mut etat, "j'observe", &mut narrateur, &mut de_joueur, &mut de_monde, &mut |_| {});
 
         assert!(resultat.is_ok());
         assert!(etat.pnj_connus.is_empty());

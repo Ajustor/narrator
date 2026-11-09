@@ -102,15 +102,15 @@ fn description_personnage(etat: &EtatPartie) -> String {
     };
 
     format!(
-        "Le joueur a {}/{} PV et possède {}.\n",
-        etat.personnage.pv_actuels, etat.personnage.pv_max, inventaire,
+        "Le joueur se nomme {} et a {}/{} PV ; il possède {}.\n",
+        etat.personnage.nom, etat.personnage.pv_actuels, etat.personnage.pv_max, inventaire,
     )
 }
 
 fn description_etat_apres_resolution(etat: &EtatPartie) -> String {
     let mut ligne = format!(
-        "État actuel : le joueur a {}/{} PV restants.",
-        etat.personnage.pv_actuels, etat.personnage.pv_max
+        "État actuel : {} a {}/{} PV restants.",
+        etat.personnage.nom, etat.personnage.pv_actuels, etat.personnage.pv_max
     );
 
     if let Some(combat) = &etat.combat_en_cours {
@@ -202,6 +202,7 @@ mod tests {
             combat_en_cours: None,
             resumes: vec![],
             pnj_connus: vec![],
+            rencontre_initiale_declenchee: true,
         }
     }
 
@@ -268,6 +269,27 @@ mod tests {
         };
         let prompt = construire_prompt_narration(&contexte);
         assert!(!prompt.is_empty());
+    }
+
+    #[test]
+    fn le_prompt_de_classification_mentionne_le_nom_du_personnage() {
+        let contexte = ContexteTour {
+            etat: etat_sans_combat(),
+            saisie_joueur: "J'observe".to_string(),
+        };
+        let prompt = construire_prompt_classification(&contexte);
+        assert!(prompt.contains("Elowen"));
+    }
+
+    #[test]
+    fn le_prompt_de_narration_mentionne_le_nom_du_personnage() {
+        let contexte = ContexteResultat {
+            etat: etat_sans_combat(),
+            action: ActionJoueur::ActionLibre("J'observe".into()),
+            resume_mecanique: vec![],
+        };
+        let prompt = construire_prompt_narration(&contexte);
+        assert!(prompt.contains("Elowen"));
     }
 
     #[test]

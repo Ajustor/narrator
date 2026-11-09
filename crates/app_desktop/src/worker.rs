@@ -1,13 +1,12 @@
 use application::ports::generateur_de::GenerateurDe;
 use application::ports::narrateur::Narrateur;
 use application::ports::sauvegarde::{ErreurSauvegarde, Sauvegarde};
-use application::usecases::commencer_combat::commencer_combat;
 use application::usecases::creer_personnage::{
     creer_personnage, tirer_valeurs_caracteristiques, ErreurCreationPersonnage,
 };
 use application::usecases::jouer_tour::JouerTour;
 use application::usecases::partie::{charger_partie, sauvegarder_partie};
-use domain::{De, Ennemi, EtatPartie};
+use domain::{De, EtatPartie, JetDe};
 use std::path::{Path, PathBuf};
 
 use crate::histoires::{self, InfoHistoire};
@@ -75,17 +74,21 @@ pub fn creer_nouvelle_histoire(
     nom: &str,
     classe: &str,
     valeurs: [u32; 6],
-    de: &mut dyn GenerateurDe,
 ) -> Result<EtatPartie, ErreurCreationPersonnage> {
     let personnage = creer_personnage(nom, classe, valeurs)?;
-    let gobelin = Ennemi::nouveau("Gobelin".to_string(), 7, De { faces: 6 }, 12, 2, 3);
-    let combat = commencer_combat(&personnage, vec![gobelin], de);
     Ok(EtatPartie {
         personnage,
         lieu_actuel: "Clairière".to_string(),
-        combat_en_cours: Some(combat),
+        // Plus de combat forcé dès la création : la première rencontre
+        // (le Gobelin) se déclenche désormais au premier vrai tour du
+        // joueur, via `JouerTour::executer` (voir
+        // `rencontre_initiale_declenchee`) — pas instantanément, en même
+        // temps que la scène d'ouverture, ce qui montrait le panneau de
+        // combat avant même que le joueur ait fait quoi que ce soit.
+        combat_en_cours: None,
         resumes: Vec::new(),
         pnj_connus: Vec::new(),
+        rencontre_initiale_declenchee: false,
     })
 }
 
@@ -107,18 +110,73 @@ pub struct ContexteHistoire<'a> {
     pub id: &'a str,
 }
 
+/// Pont entre le protocole worker<->UI et le port `GenerateurDe` : les dés
+/// du JOUEUR (son jet d'attaque, son jet de dégâts) passent par ici au
+/// lieu d'être tirés automatiquement — voir `JouerTour::executer`, qui les
+/// distingue des dés "du monde" (ennemis, rencontre initiale), restés
+/// automatiques via `infra::GenerateurDeOs` directement.
+///
+/// Le vrai tirage reste ici, côté worker — l'appui du joueur sur le dé
+/// affiché (`MessageVersWorker::DeLancee`) ne fait que déclencher le
+/// lancer, il ne choisit jamais le résultat.
+///
+/// L'étiquette envoyée à l'UI (`MessageVersUi::DeDemande`) est déduite du
+/// nombre de faces plutôt que transmise explicitement : `GenerateurDe::lancer`
+/// ne porte aucune information sur le POURQUOI du jet, et étendre sa
+/// signature pour ça aurait propagé un paramètre inutile à tous ses autres
+/// appelants (tests compris). Comme seul le jet d'attaque du joueur
+/// utilise un d20 (l'initiative, qui utilise aussi un d20, passe par
+/// `de_monde`, jamais par ici), cette règle simple reste correcte tant que
+/// le jeu n'a pas d'arme ou de sort qui utiliserait aussi un d20 pour les
+/// dégâts.
+struct GenerateurDeJoueur<'a> {
+    rx: &'a std::sync::mpsc::Receiver<MessageVersWorker>,
+    tx: &'a futures_channel::mpsc::UnboundedSender<MessageVersUi>,
+}
+
+impl GenerateurDe for GenerateurDeJoueur<'_> {
+    fn lancer(&mut self, de: De, modificateur: i32) -> JetDe {
+        let etiquette = if de.faces == 20 { "Jet d'attaque" } else { "Jet de dégâts" };
+        let _ = self.tx.unbounded_send(MessageVersUi::DeDemande { faces: de.faces, etiquette: etiquette.to_string() });
+
+        loop {
+            match self.rx.recv() {
+                Ok(MessageVersWorker::DeLancee) => break,
+                // Rien d'autre n'est attendu pendant que l'UI n'affiche
+                // que le dé (saisie désactivée côté UI) — on ignore tout
+                // message inattendu plutôt que de planter.
+                Ok(_) => continue,
+                Err(_) => {
+                    // Canal fermé en pleine attente d'un lancer :
+                    // `GenerateurDe::lancer` ne renvoie pas de `Result`,
+                    // donc impossible de remonter proprement au milieu de
+                    // la résolution d'un tour — cohérent avec le reste de
+                    // `lancer()`, qui traite un canal fermé comme fatal.
+                    std::process::exit(0);
+                }
+            }
+        }
+
+        let mut de_os = infra::GenerateurDeOs;
+        let jet = de_os.lancer(de, modificateur);
+        let _ = self.tx.unbounded_send(MessageVersUi::DeResultat(jet.resultat));
+        jet
+    }
+}
+
 pub fn traiter_message(
     etat: &mut Option<EtatPartie>,
     message: MessageVersWorker,
     narrateur: &mut dyn Narrateur,
-    de: &mut dyn GenerateurDe,
+    de_joueur: &mut dyn GenerateurDe,
+    de_monde: &mut dyn GenerateurDe,
     contexte: &ContexteHistoire,
     sur_message_ui: &mut dyn FnMut(MessageVersUi),
 ) {
     match message {
         MessageVersWorker::JouerTour(saisie) => {
             let Some(etat_courant) = etat.as_mut() else { return };
-            let resultat = JouerTour::executer(etat_courant, &saisie, narrateur, de, &mut |fragment: &str| {
+            let resultat = JouerTour::executer(etat_courant, &saisie, narrateur, de_joueur, de_monde, &mut |fragment: &str| {
                 sur_message_ui(MessageVersUi::NarrationFragment(fragment.to_string()));
             });
 
@@ -149,15 +207,19 @@ pub fn traiter_message(
         }
 
         // Ces messages n'atteignent jamais `traiter_message` en pratique :
-        // `ReprendreHistoire`/`DemarrerCreationPersonnage`/`CreerPersonnage`
-        // sont consommés par la boucle externe de `lancer()` avant qu'une
-        // histoire soit chargée ; `RetourSelection` par `jouer_histoire` ;
-        // et `ConfirmerTelechargement` par `lancer()` pendant le
-        // téléchargement. L'exhaustivité du `match` impose ces bras.
+        // `ReprendreHistoire`/`SupprimerHistoire`/`DemarrerCreationPersonnage`/
+        // `CreerPersonnage` sont consommés par la boucle externe de
+        // `lancer()` avant qu'une histoire soit chargée ; `RetourSelection`
+        // par `jouer_histoire` ; `ConfirmerTelechargement` par `lancer()`
+        // pendant le téléchargement ; et `DeLancee` par la boucle
+        // d'attente de `GenerateurDeJoueur::lancer`. L'exhaustivité du
+        // `match` impose ces bras.
         MessageVersWorker::ReprendreHistoire(_)
+        | MessageVersWorker::SupprimerHistoire(_)
         | MessageVersWorker::DemarrerCreationPersonnage
         | MessageVersWorker::CreerPersonnage { .. }
         | MessageVersWorker::RetourSelection
+        | MessageVersWorker::DeLancee
         | MessageVersWorker::ConfirmerTelechargement(_) => {}
     }
 }
@@ -175,13 +237,14 @@ fn jouer_histoire(
     tx: &futures_channel::mpsc::UnboundedSender<MessageVersUi>,
     etat: &mut Option<EtatPartie>,
     narrateur: &mut dyn Narrateur,
-    de: &mut dyn GenerateurDe,
+    de_monde: &mut dyn GenerateurDe,
     contexte: &ContexteHistoire,
 ) -> ActionApresHistoire {
+    let mut de_joueur = GenerateurDeJoueur { rx, tx };
     loop {
         match rx.recv() {
             Ok(MessageVersWorker::RetourSelection) => return ActionApresHistoire::RetourSelection,
-            Ok(message) => traiter_message(etat, message, narrateur, de, contexte, &mut |msg| {
+            Ok(message) => traiter_message(etat, message, narrateur, &mut de_joueur, de_monde, contexte, &mut |msg| {
                 let _ = tx.unbounded_send(msg);
             }),
             Err(_) => return ActionApresHistoire::CanalFerme,
@@ -226,6 +289,16 @@ pub fn lancer(
                         }
                     }
                 }
+                Ok(MessageVersWorker::SupprimerHistoire(id_a_supprimer)) => {
+                    if let Err(erreur) = histoires::supprimer(&repertoire_sauvegardes, &id_a_supprimer) {
+                        eprintln!("échec de la suppression de l'histoire : {erreur:?}");
+                    }
+                    // Comme pour l'échec de lecture ci-dessus : il faut
+                    // relancer la boucle EXTERNE pour que `histoires::lister`
+                    // soit relu et qu'un `ListeHistoires` à jour (sans
+                    // l'histoire supprimée) soit renvoyé à l'UI.
+                    continue 'selection;
+                }
                 Ok(MessageVersWorker::DemarrerCreationPersonnage) => {
                     let mut de_tirage = infra::GenerateurDeOs;
                     let valeurs = tirer_valeurs_caracteristiques(&mut de_tirage);
@@ -233,8 +306,7 @@ pub fn lancer(
                     continue;
                 }
                 Ok(MessageVersWorker::CreerPersonnage { nom, classe, valeurs, palette_modele }) => {
-                    let mut de_creation = infra::GenerateurDeOs;
-                    let Ok(etat) = creer_nouvelle_histoire(&nom, &classe, valeurs, &mut de_creation) else {
+                    let Ok(etat) = creer_nouvelle_histoire(&nom, &classe, valeurs) else {
                         continue; // formulaire invalide : ne devrait pas arriver, la Création valide déjà
                     };
                     let nouvel_id = histoires::generer_id(&nom);
@@ -396,11 +468,15 @@ mod tests {
     }
 
     #[test]
-    fn creer_nouvelle_histoire_construit_un_personnage_en_combat() {
-        let mut de = GenerateurDeFixe;
-        let etat = creer_nouvelle_histoire("Elowen", "Guerrier", [15, 14, 13, 12, 10, 8], &mut de).unwrap();
+    fn creer_nouvelle_histoire_construit_un_personnage_sans_combat_force() {
+        let etat = creer_nouvelle_histoire("Elowen", "Guerrier", [15, 14, 13, 12, 10, 8]).unwrap();
         assert_eq!(etat.personnage.nom, "Elowen");
-        assert!(etat.combat_en_cours.is_some());
+        // Plus de combat forcé dès la création : la première rencontre se
+        // déclenche désormais au premier vrai tour (voir
+        // `application::usecases::jouer_tour::amorcer_rencontre_initiale`),
+        // pas instantanément en même temps que la scène d'ouverture.
+        assert!(etat.combat_en_cours.is_none());
+        assert!(!etat.rencontre_initiale_declenchee);
     }
 
     /// Review Focus : reprendre une histoire dont le fichier est absent ou
@@ -482,6 +558,7 @@ mod tests {
             combat_en_cours: None,
             resumes: vec![],
             pnj_connus: vec![],
+            rencontre_initiale_declenchee: true,
         }
     }
 
@@ -492,7 +569,8 @@ mod tests {
         let sauvegarde = SauvegardeFichier::nouveau(chemin.clone());
         let mut etat: Option<EtatPartie> = Some(etat_sans_combat());
         let mut narrateur = NarrateurTourReussi;
-        let mut de = GenerateurDeFixe;
+        let mut de_joueur = GenerateurDeFixe;
+        let mut de_monde = GenerateurDeFixe;
         let mut messages_envoyes = Vec::new();
         let contexte = ContexteHistoire {
             sauvegarde: &sauvegarde,
@@ -505,7 +583,8 @@ mod tests {
             &mut etat,
             MessageVersWorker::JouerTour("j'observe".to_string()),
             &mut narrateur,
-            &mut de,
+            &mut de_joueur,
+            &mut de_monde,
             &contexte,
             &mut |msg| messages_envoyes.push(msg),
         );
@@ -565,7 +644,8 @@ mod tests {
         let sauvegarde = SauvegardeFichier::nouveau(chemin.clone());
         let mut etat: Option<EtatPartie> = Some(etat_sans_combat());
         let mut narrateur = NarrateurTourEnEchec;
-        let mut de = GenerateurDeFixe;
+        let mut de_joueur = GenerateurDeFixe;
+        let mut de_monde = GenerateurDeFixe;
         let mut messages_envoyes = Vec::new();
         let contexte = ContexteHistoire {
             sauvegarde: &sauvegarde,
@@ -578,7 +658,8 @@ mod tests {
             &mut etat,
             MessageVersWorker::JouerTour("j'attaque".to_string()),
             &mut narrateur,
-            &mut de,
+            &mut de_joueur,
+            &mut de_monde,
             &contexte,
             &mut |msg| messages_envoyes.push(msg),
         );
@@ -666,7 +747,10 @@ mod tests {
         etat_en_combat.personnage.subir_degats(etat_en_combat.personnage.pv_max);
         let mut etat: Option<EtatPartie> = Some(etat_en_combat);
         let mut narrateur = NarrateurMort;
-        let mut de = GenerateurDeSeedLocal::nouveau(vec![10, 4]);
+        // ActionLibre ne consomme aucun dé du joueur ; l'ennemi agit
+        // ensuite (attaque puis dégâts) via `de_monde`.
+        let mut de_joueur = GenerateurDeSeedLocal::nouveau(vec![]);
+        let mut de_monde = GenerateurDeSeedLocal::nouveau(vec![10, 4]);
         let mut messages_envoyes = Vec::new();
         let contexte = ContexteHistoire {
             sauvegarde: &sauvegarde,
@@ -679,7 +763,8 @@ mod tests {
             &mut etat,
             MessageVersWorker::JouerTour("j'observe".to_string()),
             &mut narrateur,
-            &mut de,
+            &mut de_joueur,
+            &mut de_monde,
             &contexte,
             &mut |msg| messages_envoyes.push(msg),
         );

@@ -297,6 +297,51 @@ html, body {
     color: var(--accent);
 }
 
+.ligne-histoire {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.bouton-supprimer {
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text-dim);
+    font-size: 0.8rem;
+    padding: 0.3rem 0.6rem;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.bouton-supprimer:hover {
+    color: var(--danger);
+    border-color: var(--danger);
+}
+
+.confirmation-suppression {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.8rem;
+    color: var(--danger);
+    flex-wrap: wrap;
+}
+
+.bouton-danger {
+    background: var(--danger);
+    color: var(--bg);
+    border: none;
+    border-radius: 4px;
+    padding: 0.3rem 0.6rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
 .pnj ul {
     margin: 0.5rem 0 0 0;
     padding-left: 1rem;
@@ -316,5 +361,64 @@ html, body {
     background: var(--accent);
     height: 100%;
     transition: width 0.2s ease;
+}
+
+.voile-de {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 20;
+}
+
+.dialogue-de {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 2rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.etiquette-de {
+    color: var(--accent);
+    font-weight: 600;
+    font-size: 1.1rem;
+    margin: 0;
+}
+
+.de-bouton {
+    width: 6rem;
+    height: 6rem;
+    border-radius: 12px;
+    background: var(--accent);
+    color: var(--bg);
+    border: none;
+    font-size: 1.3rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: transform 0.1s ease;
+}
+
+.de-bouton:active {
+    transform: scale(0.92) rotate(-4deg);
+}
+
+.de-resultat {
+    width: 6rem;
+    height: 6rem;
+    border-radius: 12px;
+    background: var(--bg);
+    border: 2px solid var(--accent);
+    color: var(--accent);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 2rem;
+    font-weight: 700;
 }
 "#;

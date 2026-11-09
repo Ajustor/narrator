@@ -131,6 +131,15 @@ fn App() -> Element {
     // `SelectionHistoire` jusqu'à ce que l'utilisateur agisse à nouveau
     // depuis cet écran.
     let mut erreur_pre_jeu: Signal<Option<String>> = use_signal(|| None);
+    // Dé virtuel du joueur : `Some((faces, etiquette))` dès que le worker
+    // demande un jet du joueur (voir `worker::GenerateurDeJoueur`), jusqu'à
+    // ce que le tour se termine (`TourTermine`/`TourEchoue`) ou qu'un
+    // second jet soit demandé dans le même tour (attaque puis dégâts).
+    let mut de_en_attente: Signal<Option<(u32, String)>> = use_signal(|| None);
+    // Résultat du jet en attente, affiché sur le dé dès qu'il arrive — mis
+    // à `None` à chaque nouvelle demande (`DeDemande`) pour ne jamais
+    // montrer le résultat d'un jet précédent sur un dé qui attend encore.
+    let mut dernier_resultat_de: Signal<Option<u32>> = use_signal(|| None);
 
     use_future(move || {
         let rx_partage = rx_partage.clone();
@@ -185,6 +194,8 @@ fn App() -> Element {
                     faire_defiler_journal();
                 }
                 MessageVersUi::TourTermine { etat: nouvel_etat, resultat_narration, resume_mecanique, vainqueur_combat, partie_terminee } => {
+                    de_en_attente.set(None);
+                    dernier_resultat_de.set(None);
                     journal.write().push(resultat_narration);
                     for ligne in resume_mecanique {
                         journal.write().push(ligne);
@@ -218,6 +229,8 @@ fn App() -> Element {
                     // serait immédiatement remplacé. Pendant Vue::Jeu, un
                     // échec de tour reste local au journal, comme avant.
                     if matches!(vue(), Vue::Jeu) {
+                        de_en_attente.set(None);
+                        dernier_resultat_de.set(None);
                         journal.write().push(format!("⚠ {}", message));
                         narration_en_cours.set(String::new());
                         tour_en_cours.set(false);
@@ -233,6 +246,13 @@ fn App() -> Element {
                 }
                 MessageVersUi::ConfirmationTelechargementRequise { palette, taille_octets } => {
                     vue.set(Vue::ConfirmationTelechargement { palette, taille_octets });
+                }
+                MessageVersUi::DeDemande { faces, etiquette } => {
+                    dernier_resultat_de.set(None);
+                    de_en_attente.set(Some((faces, etiquette)));
+                }
+                MessageVersUi::DeResultat(valeur) => {
+                    dernier_resultat_de.set(Some(valeur));
                 }
             }
         }
@@ -253,7 +273,7 @@ fn App() -> Element {
             SelectionHistoire {
                 histoires,
                 erreur: erreur_pre_jeu(),
-                sur_reprendre: move |msg| {
+                sur_message: move |msg| {
                     erreur_pre_jeu.set(None);
                     let _ = tx.send(msg);
                 },
@@ -275,12 +295,15 @@ fn App() -> Element {
                 return rsx! { div { "Chargement..." } };
             };
             let tx_retour_selection = tx.clone();
+            let tx_de = tx.clone();
             rsx! {
                 Jeu {
                     etat: etat_actuel,
                     journal: journal(),
                     narration_en_cours: narration_en_cours(),
                     tour_en_cours: tour_en_cours(),
+                    de_en_attente: de_en_attente(),
+                    dernier_resultat_de: dernier_resultat_de(),
                     sur_action: move |msg| {
                         tour_en_cours.set(true);
                         narration_en_cours.set(String::new());
@@ -288,6 +311,9 @@ fn App() -> Element {
                     },
                     sur_retour_selection: move |_| {
                         let _ = tx_retour_selection.send(MessageVersWorker::RetourSelection);
+                    },
+                    sur_lancer_de: move |_| {
+                        let _ = tx_de.send(MessageVersWorker::DeLancee);
                     },
                 }
             }

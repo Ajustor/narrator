@@ -9,8 +9,17 @@ pub fn Jeu(
     journal: Vec<String>,
     narration_en_cours: String,
     tour_en_cours: bool,
+    /// `Some((faces, etiquette))` tant que le worker attend que le joueur
+    /// lance son propre dé (attaque ou dégâts) — voir
+    /// `worker::GenerateurDeJoueur`. Les jets des ennemis restent
+    /// automatiques et ne passent jamais par ici.
+    de_en_attente: Option<(u32, String)>,
+    /// Résultat réel du dé une fois lancé, affiché sur le dé avant même
+    /// que la narration complète du tour arrive.
+    dernier_resultat_de: Option<u32>,
     sur_action: EventHandler<MessageVersWorker>,
     sur_retour_selection: EventHandler<()>,
+    sur_lancer_de: EventHandler<()>,
 ) -> Element {
     let mut saisie = use_signal(String::new);
     let mut pnj_deplie: Signal<Option<String>> = use_signal(|| None);
@@ -23,6 +32,24 @@ pub fn Jeu(
     };
 
     rsx! {
+        if let Some((faces, etiquette)) = de_en_attente.clone() {
+            div { class: "voile-de",
+                div { class: "dialogue-de",
+                    p { class: "etiquette-de", "{etiquette}" }
+                    if let Some(valeur) = dernier_resultat_de {
+                        div { class: "de-resultat", "{valeur}" }
+                        p { class: "texte-discret", "d{faces}" }
+                    } else {
+                        button {
+                            class: "de-bouton",
+                            onclick: move |_| sur_lancer_de.call(()),
+                            "d{faces}"
+                        }
+                        p { class: "texte-discret", "Touche le dé pour lancer" }
+                    }
+                }
+            }
+        }
         div { class: "ecran-jeu",
             div { class: "zone-principale",
                 header { class: "en-tete",

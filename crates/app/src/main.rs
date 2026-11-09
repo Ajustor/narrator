@@ -2,10 +2,9 @@ mod creation;
 
 use application::ports::narrateur::Narrateur;
 use application::ports::sauvegarde::ErreurSauvegarde;
-use application::usecases::commencer_combat::commencer_combat;
 use application::usecases::jouer_tour::JouerTour;
 use application::usecases::partie::{charger_partie, sauvegarder_partie};
-use domain::{De, Ennemi, EtatPartie, Vainqueur};
+use domain::{EtatPartie, Vainqueur};
 use infra::{GenerateurDeOs, LlamaNarrateur, SauvegardeFichier};
 use std::io::{self, Write};
 use std::path::PathBuf;
@@ -38,14 +37,16 @@ fn main() {
                 Ok(_) => println!(),
                 Err(erreur) => eprintln!("\n(échec de l'introduction narrée : {erreur:?})"),
             }
-            let gobelin = Ennemi::nouveau("Gobelin".to_string(), 7, De { faces: 6 }, 12, 2, 3);
-            let combat = commencer_combat(&personnage, vec![gobelin], &mut de);
+            // Plus de combat forcé dès la création : la première rencontre
+            // se déclenche désormais au premier vrai tour, dans
+            // `JouerTour::executer` (voir `rencontre_initiale_declenchee`).
             EtatPartie {
                 personnage,
                 lieu_actuel: "Clairière".to_string(),
-                combat_en_cours: Some(combat),
+                combat_en_cours: None,
                 resumes: Vec::new(),
                 pnj_connus: Vec::new(),
+                rencontre_initiale_declenchee: false,
             }
         }
         Err(ErreurSauvegarde::Lecture(message)) => {
@@ -66,7 +67,12 @@ fn main() {
         io::stdin().read_line(&mut saisie).expect("lecture échouée");
         let saisie = saisie.trim();
 
-        let resultat = JouerTour::executer(&mut etat, saisie, &mut narrateur, &mut de, &mut |frag: &str| {
+        // La console n'a pas de dé virtuel à l'écran : le joueur et le
+        // monde partagent le même générateur automatique, juste séparé en
+        // deux instances (sans état, `GenerateurDeOs` ne peut pas être
+        // emprunté deux fois dans le même appel).
+        let mut de_monde = GenerateurDeOs;
+        let resultat = JouerTour::executer(&mut etat, saisie, &mut narrateur, &mut de, &mut de_monde, &mut |frag: &str| {
             print!("{}", frag);
             io::stdout().flush().ok();
         });
