@@ -2,8 +2,8 @@ use crate::ports::generateur_de::GenerateurDe;
 use crate::ports::narrateur::{ContexteResultat, ContexteTour, ErreurNarrateur, Narrateur};
 use crate::usecases::commencer_combat::commencer_combat;
 use domain::{
-    evaluer_jet_attaque, modificateur, ActionJoueur, Acteur, De, EffetObjet, Ennemi, EtatPartie, FichePnj, JetDe,
-    Vainqueur, BONUS_MAITRISE,
+    evaluer_jet_attaque, gabarit_ennemi, modificateur, ActionJoueur, Acteur, De, EffetObjet, Ennemi, EtatPartie,
+    FichePnj, JetDe, Vainqueur, BONUS_MAITRISE,
 };
 
 // SEUIL_MOTS_RESUMES est choisi pour rester largement sous TAILLE_CONTEXTE
@@ -62,6 +62,7 @@ pub fn valider_action(action: &ActionJoueur, etat: &EtatPartie) -> Result<(), Er
             }
         }
         ActionJoueur::ActionLibre { .. } => Ok(()),
+        ActionJoueur::ProvoquerCombat { .. } => Ok(()),
     }
 }
 
@@ -94,8 +95,10 @@ fn lancer_degats(de: &mut dyn GenerateurDe, type_de: De, critique: bool) -> JetD
 pub fn resoudre_action_joueur(
     etat: &mut EtatPartie,
     action: &ActionJoueur,
-    de: &mut dyn GenerateurDe,
+    de_joueur: &mut dyn GenerateurDe,
+    de_monde: &mut dyn GenerateurDe,
 ) -> Vec<String> {
+    let de = de_joueur;
     let mut resume = Vec::new();
     match action {
         ActionJoueur::Attaquer { cible } => {
@@ -200,6 +203,21 @@ pub fn resoudre_action_joueur(
                 }
             } else if combat_actif && !*agressif {
                 resume.push(format!("💬 Tentative non-agressive : « {texte} »."));
+            }
+        }
+        ActionJoueur::ProvoquerCombat { ennemi, difficulte } => {
+            if etat.combat_en_cours.is_none() {
+                let nouvel_ennemi = gabarit_ennemi(ennemi.clone(), *difficulte);
+                let combat = commencer_combat(&etat.personnage, vec![nouvel_ennemi], de_monde);
+                etat.combat_en_cours = Some(combat);
+                resume.push(format!("⚔️ {ennemi} surgit et t'attaque !"));
+            } else {
+                resume.extend(resoudre_action_joueur(
+                    etat,
+                    &ActionJoueur::Attaquer { cible: ennemi.clone() },
+                    de,
+                    de_monde,
+                ));
             }
         }
     }
@@ -441,7 +459,7 @@ impl JouerTour {
         let fuite = matches!(action_proposee, ActionJoueur::Fuir);
 
         if fuite {
-            resume.extend(resoudre_action_joueur(etat, &action_proposee, de_joueur));
+            resume.extend(resoudre_action_joueur(etat, &action_proposee, de_joueur, de_monde));
         } else {
             // Ordre d'initiative complet (joueur + chaque ennemi
             // individuellement, voir `Combat::ordre_de_tour`) plutôt que
@@ -467,7 +485,7 @@ impl JouerTour {
                         if let Some(combat) = etat.combat_en_cours.as_mut() {
                             combat.joueur_esquive = false;
                         }
-                        resume.extend(resoudre_action_joueur(etat, &action_proposee, de_joueur));
+                        resume.extend(resoudre_action_joueur(etat, &action_proposee, de_joueur, de_monde));
                         terminer_si_ennemis_morts(etat);
                     }
                     Acteur::Ennemi(indice) => {
@@ -624,7 +642,8 @@ mod tests {
         // attaque: d20=10 + mod_dex(14)=2 + maîtrise 2 => 14 >= defense 12 (touché, pas critique)
         // dégâts: mains nues d4=3 (aucune arme en inventaire)
         let mut de = GenerateurDeSeed::nouveau(vec![10, 3]);
-        let resume = resoudre_action_joueur(&mut etat, &ActionJoueur::Attaquer { cible: "Gobelin".into() }, &mut de);
+        let mut de_monde = GenerateurDeSeed::nouveau(vec![]);
+        let resume = resoudre_action_joueur(&mut etat, &ActionJoueur::Attaquer { cible: "Gobelin".into() }, &mut de, &mut de_monde);
         let gobelin = &etat.combat_en_cours.as_ref().unwrap().ennemis[0];
         assert_eq!(gobelin.pv_actuels, 4); // 7 - 3
         assert!(resume[0].contains("touché"));
@@ -635,7 +654,8 @@ mod tests {
         let mut etat = etat_en_combat();
         // attaque: d20=5 + mod_dex(14)=2 + maîtrise 2 => 9 < defense 12 (manqué)
         let mut de = GenerateurDeSeed::nouveau(vec![5, 3]);
-        let resume = resoudre_action_joueur(&mut etat, &ActionJoueur::Attaquer { cible: "Gobelin".into() }, &mut de);
+        let mut de_monde = GenerateurDeSeed::nouveau(vec![]);
+        let resume = resoudre_action_joueur(&mut etat, &ActionJoueur::Attaquer { cible: "Gobelin".into() }, &mut de, &mut de_monde);
         let gobelin = &etat.combat_en_cours.as_ref().unwrap().ennemis[0];
         assert_eq!(gobelin.pv_actuels, 7);
         assert!(resume[0].contains("manqué"));
@@ -649,7 +669,8 @@ mod tests {
         // ("plus de résultats programmés").
         let mut etat = etat_en_combat();
         let mut de = GenerateurDeSeed::nouveau(vec![5]); // d20=5 + 2 + 2 => 9 < défense 12 (manqué)
-        let resume = resoudre_action_joueur(&mut etat, &ActionJoueur::Attaquer { cible: "Gobelin".into() }, &mut de);
+        let mut de_monde = GenerateurDeSeed::nouveau(vec![]);
+        let resume = resoudre_action_joueur(&mut etat, &ActionJoueur::Attaquer { cible: "Gobelin".into() }, &mut de, &mut de_monde);
         assert!(resume[0].contains("manqué"));
     }
 
@@ -660,7 +681,8 @@ mod tests {
         // relancés et sommés (mains nues), pas doublés arithmétiquement.
         let mut etat = etat_en_combat();
         let mut de = GenerateurDeSeed::nouveau(vec![20, 2, 3]);
-        let resume = resoudre_action_joueur(&mut etat, &ActionJoueur::Attaquer { cible: "Gobelin".into() }, &mut de);
+        let mut de_monde = GenerateurDeSeed::nouveau(vec![]);
+        let resume = resoudre_action_joueur(&mut etat, &ActionJoueur::Attaquer { cible: "Gobelin".into() }, &mut de, &mut de_monde);
         let gobelin = &etat.combat_en_cours.as_ref().unwrap().ennemis[0];
         assert_eq!(gobelin.pv_actuels, 2); // 7 - (2 + 3)
         assert!(resume[0].contains("critique"));
@@ -673,7 +695,8 @@ mod tests {
         // que le résultat brut de 1 est ce qui décide, pas le total.
         let mut etat = etat_en_combat();
         let mut de = GenerateurDeSeed::nouveau(vec![1]);
-        let resume = resoudre_action_joueur(&mut etat, &ActionJoueur::Attaquer { cible: "Gobelin".into() }, &mut de);
+        let mut de_monde = GenerateurDeSeed::nouveau(vec![]);
+        let resume = resoudre_action_joueur(&mut etat, &ActionJoueur::Attaquer { cible: "Gobelin".into() }, &mut de, &mut de_monde);
         let gobelin = &etat.combat_en_cours.as_ref().unwrap().ennemis[0];
         assert_eq!(gobelin.pv_actuels, 7);
         assert!(resume[0].contains("échec critique"));
@@ -683,7 +706,8 @@ mod tests {
     fn esquiver_active_le_flag_sur_le_combat() {
         let mut etat = etat_en_combat();
         let mut de = GenerateurDeSeed::nouveau(vec![]);
-        let resume = resoudre_action_joueur(&mut etat, &ActionJoueur::Esquiver, &mut de);
+        let mut de_monde = GenerateurDeSeed::nouveau(vec![]);
+        let resume = resoudre_action_joueur(&mut etat, &ActionJoueur::Esquiver, &mut de, &mut de_monde);
         assert!(etat.combat_en_cours.as_ref().unwrap().joueur_esquive);
         assert!(resume[0].contains("esquiver"));
     }
@@ -692,10 +716,12 @@ mod tests {
     fn action_libre_hors_combat_ne_consomme_aucun_de() {
         let mut etat = etat_sans_combat();
         let mut de = GenerateurDeSeed::nouveau(vec![]);
+        let mut de_monde = GenerateurDeSeed::nouveau(vec![]);
         let resume = resoudre_action_joueur(
             &mut etat,
             &ActionJoueur::ActionLibre { texte: "J'observe".into(), agressif: false },
             &mut de,
+            &mut de_monde,
         );
         assert!(resume.is_empty());
     }
@@ -710,10 +736,12 @@ mod tests {
         // mod_dex(2) + maîtrise(2) = 14 >= 12 (touché) ; dégâts d4=3.
         let mut etat = etat_en_combat();
         let mut de = GenerateurDeSeed::nouveau(vec![10, 15, 3]);
+        let mut de_monde = GenerateurDeSeed::nouveau(vec![]);
         let resume = resoudre_action_joueur(
             &mut etat,
             &ActionJoueur::ActionLibre { texte: "je lui jette du sable".into(), agressif: true },
             &mut de,
+            &mut de_monde,
         );
         let gobelin = &etat.combat_en_cours.as_ref().unwrap().ennemis[0];
         assert_eq!(gobelin.pv_actuels, 4); // 7 - 3
@@ -731,10 +759,12 @@ mod tests {
         // paniquer `GenerateurDeSeed`.
         let mut etat = etat_en_combat();
         let mut de = GenerateurDeSeed::nouveau(vec![5, 5]);
+        let mut de_monde = GenerateurDeSeed::nouveau(vec![]);
         let resume = resoudre_action_joueur(
             &mut etat,
             &ActionJoueur::ActionLibre { texte: "je recule".into(), agressif: true },
             &mut de,
+            &mut de_monde,
         );
         assert!(resume[0].contains("manqué"));
     }
@@ -743,10 +773,12 @@ mod tests {
     fn action_libre_agressive_en_combat_devient_une_attaque_improvisee() {
         let mut etat = etat_en_combat();
         let mut de = GenerateurDeSeed::nouveau(vec![15, 15, 4]); // désavantage garde 15, dégâts 4
+        let mut de_monde = GenerateurDeSeed::nouveau(vec![]);
         let resume = resoudre_action_joueur(
             &mut etat,
             &ActionJoueur::ActionLibre { texte: "je frappe avec une chaise".into(), agressif: true },
             &mut de,
+            &mut de_monde,
         );
         assert!(resume.iter().any(|l| l.contains("Tentative improvisée")));
         assert!(etat.combat_en_cours.as_ref().unwrap().ennemis[0].pv_actuels < 7);
@@ -756,10 +788,12 @@ mod tests {
     fn action_libre_non_agressive_en_combat_ne_lance_aucun_de() {
         let mut etat = etat_en_combat();
         let mut de = GenerateurDeSeed::nouveau(vec![]); // doit paniquer si un dé est lancé
+        let mut de_monde = GenerateurDeSeed::nouveau(vec![]);
         let resume = resoudre_action_joueur(
             &mut etat,
             &ActionJoueur::ActionLibre { texte: "je négocie avec le gobelin".into(), agressif: false },
             &mut de,
+            &mut de_monde,
         );
         assert_eq!(etat.combat_en_cours.as_ref().unwrap().ennemis[0].pv_actuels, 7);
         assert!(resume.iter().any(|l| l.contains("non-agressive")));
@@ -770,7 +804,8 @@ mod tests {
         let mut etat = etat_sans_combat();
         etat.personnage.subir_degats(5);
         let mut de = GenerateurDeSeed::nouveau(vec![]);
-        let resume = resoudre_action_joueur(&mut etat, &ActionJoueur::UtiliserObjet { objet: "Potion de soin".into() }, &mut de);
+        let mut de_monde = GenerateurDeSeed::nouveau(vec![]);
+        let resume = resoudre_action_joueur(&mut etat, &ActionJoueur::UtiliserObjet { objet: "Potion de soin".into() }, &mut de, &mut de_monde);
         assert_eq!(etat.personnage.pv_actuels, etat.personnage.pv_max);
         assert!(etat.personnage.inventaire.is_empty());
         assert!(resume[0].contains("Potion de soin"));
@@ -780,10 +815,43 @@ mod tests {
     fn fuir_termine_le_combat_avec_le_vainqueur_fuite() {
         let mut etat = etat_en_combat();
         let mut de = GenerateurDeSeed::nouveau(vec![]);
-        resoudre_action_joueur(&mut etat, &ActionJoueur::Fuir, &mut de);
+        let mut de_monde = GenerateurDeSeed::nouveau(vec![]);
+        resoudre_action_joueur(&mut etat, &ActionJoueur::Fuir, &mut de, &mut de_monde);
         let combat = etat.combat_en_cours.as_ref().unwrap();
         assert!(combat.termine);
         assert_eq!(combat.vainqueur, Some(Vainqueur::Fuite));
+    }
+
+    #[test]
+    fn provoquer_combat_sans_combat_en_cours_en_demarre_un_avec_le_bon_gabarit() {
+        let mut etat = etat_sans_combat();
+        let mut de_joueur = GenerateurDeSeed::nouveau(vec![]);
+        let mut de_monde = GenerateurDeSeed::nouveau(vec![10, 5]); // init joueur, init ennemi
+        let resume = resoudre_action_joueur(
+            &mut etat,
+            &ActionJoueur::ProvoquerCombat { ennemi: "Loup".into(), difficulte: domain::Difficulte::Faible },
+            &mut de_joueur,
+            &mut de_monde,
+        );
+        let combat = etat.combat_en_cours.as_ref().expect("un combat doit démarrer");
+        assert_eq!(combat.ennemis[0].nom, "Loup");
+        assert_eq!(combat.ennemis[0].pv_max, 4); // palier Faible
+        assert!(resume.iter().any(|l| l.contains("Loup")));
+    }
+
+    #[test]
+    fn provoquer_combat_alors_qu_un_combat_est_deja_en_cours_attaque_au_lieu_de_planter() {
+        let mut etat = etat_en_combat(); // contient déjà un Gobelin
+        let mut de_joueur = GenerateurDeSeed::nouveau(vec![15, 4]); // attaque, dégâts
+        let mut de_monde = GenerateurDeSeed::nouveau(vec![]);
+        let resume = resoudre_action_joueur(
+            &mut etat,
+            &ActionJoueur::ProvoquerCombat { ennemi: "Gobelin".into(), difficulte: domain::Difficulte::Fort },
+            &mut de_joueur,
+            &mut de_monde,
+        );
+        assert_eq!(etat.combat_en_cours.as_ref().unwrap().ennemis.len(), 1); // pas de doublon
+        assert!(!resume.is_empty());
     }
 
     use crate::ports::narrateur::{ContexteResultat, ContexteTour, ErreurNarrateur, Narrateur, PnjDetecte};

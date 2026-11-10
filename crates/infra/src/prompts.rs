@@ -25,6 +25,17 @@ pub fn construire_prompt_classification(contexte: &ContexteTour) -> String {
     } else {
         ("{\"action\": \"libre\"}", "")
     };
+    let (exemple_provoquer_combat, instruction_provoquer_combat): (&str, &str) = if combat_actif {
+        ("", "")
+    } else {
+        (
+            "{\"action\": \"provoquer_combat\", \"ennemi\": \"NomDeLEnnemi\", \"difficulte\": \"faible\"|\"moyen\"|\"fort\"}\n",
+            "Utilise \"provoquer_combat\" seulement si l'action du joueur est hostile \
+             envers une cible nommée, ou si la situation appelle une rencontre hostile \
+             soudaine. Choisis \"faible\" par défaut pour la difficulté, sauf si le \
+             joueur a clairement attaqué ou si l'histoire a déjà escaladé.\n",
+        )
+    };
     format!(
         "Tu es le maître du jeu d'un jeu de rôle solo en français.\n\
          Le joueur se trouve à : {}.\n\
@@ -32,21 +43,25 @@ pub fn construire_prompt_classification(contexte: &ContexteTour) -> String {
          {}\
          Le joueur dit : \"{}\"\n\
          Réponds uniquement par un objet JSON décrivant l'action correspondante, \
-         sans aucun autre texte. Utilise exactement un de ces cinq formats, \
+         sans aucun autre texte. Utilise exactement un de ces formats, \
          avec ces clés exactes (remplace seulement la valeur après les deux-points \
-         pour \"cible\"/\"objet\") :\n\
+         pour \"cible\"/\"objet\"/\"ennemi\"/\"difficulte\") :\n\
          {{\"action\": \"attaquer\", \"cible\": \"NomDeLEnnemi\"}}\n\
          {{\"action\": \"utiliser_objet\", \"objet\": \"NomDeLObjet\"}}\n\
          {{\"action\": \"fuir\"}}\n\
          {{\"action\": \"esquiver\"}}\n\
+         {}\
          {}\n\
+         {}\
          {}",
         contexte.etat.lieu_actuel,
         description_combat(&contexte.etat),
         description_personnage(&contexte.etat),
         contexte.saisie_joueur,
+        exemple_provoquer_combat,
         exemple_libre,
         instruction_agressif,
+        instruction_provoquer_combat,
     )
 }
 
@@ -258,12 +273,18 @@ mod tests {
 
     #[test]
     fn le_prompt_de_classification_ne_mentionne_pas_de_combat_hors_combat() {
+        // Ne vérifie plus l'absence pure et simple du mot "combat" : le
+        // format "provoquer_combat" (nouveau mécanisme de déclenchement
+        // dynamique) est désormais ajouté précisément dans cette branche
+        // hors-combat, et contient ce mot dans son nom. Ce qui reste
+        // interdit ici, c'est la description d'un combat déjà actif
+        // (`description_combat`), absurde hors combat.
         let contexte = ContexteTour {
             etat: etat_sans_combat(),
             saisie_joueur: "J'observe".to_string(),
         };
         let prompt = construire_prompt_classification(&contexte);
-        assert!(!prompt.contains("combat"));
+        assert!(!prompt.contains("Il est en combat contre"));
     }
 
     #[test]

@@ -112,6 +112,25 @@ pub fn interpreter_json_action(json_brut: &str) -> Result<domain::ActionJoueur, 
         }
         "fuir" => Ok(ActionJoueur::Fuir),
         "esquiver" => Ok(ActionJoueur::Esquiver),
+        "provoquer_combat" => {
+            let ennemi = valeur
+                .get("ennemi")
+                .and_then(Value::as_str)
+                .ok_or_else(|| ErreurInterpretation("champ \"ennemi\" manquant".to_string()))?;
+            let difficulte_brute = valeur
+                .get("difficulte")
+                .and_then(Value::as_str)
+                .ok_or_else(|| ErreurInterpretation("champ \"difficulte\" manquant".to_string()))?;
+            let difficulte = match difficulte_brute {
+                "faible" => domain::Difficulte::Faible,
+                "moyen" => domain::Difficulte::Moyen,
+                "fort" => domain::Difficulte::Fort,
+                autre => {
+                    return Err(ErreurInterpretation(format!("difficulté inconnue : {autre}")))
+                }
+            };
+            Ok(ActionJoueur::ProvoquerCombat { ennemi: ennemi.to_string(), difficulte })
+        }
         "libre" => {
             let texte = valeur.get("texte").and_then(Value::as_str).unwrap_or("").to_string();
             let agressif = valeur.get("agressif").and_then(Value::as_bool).unwrap_or(false);
@@ -389,5 +408,13 @@ mod tests {
     fn une_action_inconnue_echoue() {
         let resultat = interpreter_json_action(r#"{"action":"voler"}"#);
         assert!(resultat.is_err());
+    }
+
+    #[test]
+    fn interprete_une_provocation_de_combat() {
+        let action = interpreter_json_action(
+            r#"{"action":"provoquer_combat","ennemi":"Loup","difficulte":"faible"}"#,
+        ).unwrap();
+        assert_eq!(action, ActionJoueur::ProvoquerCombat { ennemi: "Loup".into(), difficulte: domain::Difficulte::Faible });
     }
 }
