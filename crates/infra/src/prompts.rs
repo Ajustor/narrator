@@ -267,6 +267,27 @@ mod tests {
     }
 
     #[test]
+    fn le_prompt_de_classification_demande_l_agressivite_d_une_action_libre_en_combat() {
+        let contexte = ContexteTour {
+            etat: etat_en_combat(),
+            saisie_joueur: "Je lui jette du sable".to_string(),
+        };
+        let prompt = construire_prompt_classification(&contexte);
+        assert!(prompt.contains(r#""agressif""#));
+        assert!(prompt.contains("hostile"));
+    }
+
+    #[test]
+    fn le_prompt_de_classification_ne_demande_pas_l_agressivite_hors_combat() {
+        let contexte = ContexteTour {
+            etat: etat_sans_combat(),
+            saisie_joueur: "J'observe".to_string(),
+        };
+        let prompt = construire_prompt_classification(&contexte);
+        assert!(!prompt.contains("agressif"));
+    }
+
+    #[test]
     fn le_prompt_de_narration_contient_le_resume_mecanique() {
         let contexte = ContexteResultat {
             etat: etat_en_combat(),
