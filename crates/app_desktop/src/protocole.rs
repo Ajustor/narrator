@@ -1,4 +1,4 @@
-use domain::{EtatPartie, Vainqueur};
+use domain::{EtatPartie, Genre, Vainqueur};
 
 pub use crate::histoires::InfoHistoire;
 pub use crate::modeles::PaletteModele;
@@ -8,7 +8,14 @@ pub enum MessageVersWorker {
     ReprendreHistoire(String),
     SupprimerHistoire(String),
     DemarrerCreationPersonnage,
-    CreerPersonnage { nom: String, classe: String, valeurs: [u32; 6], palette_modele: PaletteModele },
+    CreerPersonnage {
+        nom: String,
+        classe: String,
+        valeurs: [u32; 6],
+        palette_modele: PaletteModele,
+        genre: Genre,
+        premisse_libre: String,
+    },
     JouerTour(String),
     /// Le joueur a touché le dé virtuel affiché à l'écran — déclenche le
     /// lancer (voir `MessageVersUi::DeDemande`), ne porte aucun résultat :

@@ -6,7 +6,7 @@ use application::usecases::creer_personnage::{
 };
 use application::usecases::jouer_tour::JouerTour;
 use application::usecases::partie::{charger_partie, sauvegarder_partie};
-use domain::{De, EtatPartie, JetDe};
+use domain::{De, EtatPartie, Genre, JetDe};
 use std::path::{Path, PathBuf};
 
 use crate::histoires::{self, InfoHistoire};
@@ -74,6 +74,8 @@ pub fn creer_nouvelle_histoire(
     nom: &str,
     classe: &str,
     valeurs: [u32; 6],
+    genre: Genre,
+    premisse_libre: String,
 ) -> Result<EtatPartie, ErreurCreationPersonnage> {
     let personnage = creer_personnage(nom, classe, valeurs)?;
     Ok(EtatPartie {
@@ -86,7 +88,12 @@ pub fn creer_nouvelle_histoire(
         combat_en_cours: None,
         resumes: Vec::new(),
         pnj_connus: Vec::new(),
-        premisse: Default::default(),
+        // Stockée verbatim, sans troncature : la troncature se fait au
+        // moment de la construction du prompt
+        // (`description_premisse`/`construire_prompt_introduction`), pas
+        // ici, pour rester le seul endroit qui décide de la longueur
+        // affichée au modèle.
+        premisse: domain::PremisseHistoire { genre, description: premisse_libre },
     })
 }
 
@@ -303,8 +310,8 @@ pub fn lancer(
                     let _ = tx.unbounded_send(MessageVersUi::ValeursProposees(valeurs));
                     continue;
                 }
-                Ok(MessageVersWorker::CreerPersonnage { nom, classe, valeurs, palette_modele }) => {
-                    let Ok(etat) = creer_nouvelle_histoire(&nom, &classe, valeurs) else {
+                Ok(MessageVersWorker::CreerPersonnage { nom, classe, valeurs, palette_modele, genre, premisse_libre }) => {
+                    let Ok(etat) = creer_nouvelle_histoire(&nom, &classe, valeurs, genre, premisse_libre) else {
                         continue; // formulaire invalide : ne devrait pas arriver, la Création valide déjà
                     };
                     let nouvel_id = histoires::generer_id(&nom);
@@ -468,12 +475,25 @@ mod tests {
 
     #[test]
     fn creer_nouvelle_histoire_construit_un_personnage_sans_combat_force() {
-        let etat = creer_nouvelle_histoire("Elowen", "Guerrier", [15, 14, 13, 12, 10, 8]).unwrap();
+        let etat = creer_nouvelle_histoire(
+            "Elowen", "Guerrier", [15, 14, 13, 12, 10, 8],
+            Genre::default(), String::new(),
+        ).unwrap();
         assert_eq!(etat.personnage.nom, "Elowen");
         // Pas de combat forcé dès la création : un combat ne démarre que
         // via `ActionJoueur::ProvoquerCombat`, jamais instantanément en
         // même temps que la scène d'ouverture.
         assert!(etat.combat_en_cours.is_none());
+    }
+
+    #[test]
+    fn creer_nouvelle_histoire_porte_le_genre_et_la_premisse_choisis() {
+        let etat = creer_nouvelle_histoire(
+            "Elowen", "Guerrier", [15, 14, 13, 12, 10, 8],
+            Genre::Horreur, "une vieille malédiction".into(),
+        ).unwrap();
+        assert_eq!(etat.premisse.genre, Genre::Horreur);
+        assert_eq!(etat.premisse.description, "une vieille malédiction");
     }
 
     /// Review Focus : reprendre une histoire dont le fichier est absent ou

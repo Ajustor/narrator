@@ -1,5 +1,6 @@
 use application::usecases::creer_personnage::CLASSES_VALIDES;
 use dioxus::prelude::*;
+use domain::Genre;
 
 use crate::modeles::PaletteModele;
 use crate::protocole::MessageVersWorker;
@@ -15,6 +16,8 @@ pub fn Creation(valeurs_proposees: [u32; 6], sur_creation: EventHandler<MessageV
     // `valeurs_proposees` qui lui a été attribué (pas la valeur elle-même).
     let mut origines = use_signal(|| [None::<usize>; 6]);
     let mut palette = use_signal(|| PaletteModele::Equilibre);
+    let mut genre = use_signal(Genre::default);
+    let mut premisse_libre = use_signal(String::new);
 
     // Les origines (indices dans `valeurs_proposees`) encore disponibles
     // pour la caractéristique `index_a_exclure` : tous les indices sauf
@@ -91,6 +94,28 @@ pub fn Creation(valeurs_proposees: [u32; 6], sur_creation: EventHandler<MessageV
                         p { class: "avertissement", "{avertissement}" }
                     }
                 }
+                div { class: "champ",
+                    label { "Genre : " }
+                    select {
+                        value: "{genre().nom_affiche()}",
+                        onchange: move |evt| {
+                            if let Some(g) = Genre::TOUTES.iter().find(|g| g.nom_affiche() == evt.value()) {
+                                genre.set(*g);
+                            }
+                        },
+                        for g in Genre::TOUTES.iter() {
+                            option { key: "{g.nom_affiche()}", value: "{g.nom_affiche()}", "{g.nom_affiche()}" }
+                        }
+                    }
+                }
+                div { class: "champ",
+                    label { "Prémisse (optionnel) : " }
+                    textarea {
+                        maxlength: "300",
+                        value: "{premisse_libre}",
+                        oninput: move |evt| premisse_libre.set(evt.value()),
+                    }
+                }
                 for (index, label) in NOMS_CARACTERISTIQUES.iter().enumerate() {
                     div { class: "champ",
                         label { "{label} : " }
@@ -121,6 +146,8 @@ pub fn Creation(valeurs_proposees: [u32; 6], sur_creation: EventHandler<MessageV
                             classe: classe(),
                             valeurs,
                             palette_modele: palette(),
+                            genre: genre(),
+                            premisse_libre: premisse_libre(),
                         });
                     },
                     "Commencer l'aventure"
