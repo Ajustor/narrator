@@ -46,6 +46,23 @@ fn repertoire_donnees_app() -> PathBuf {
     PathBuf::from(chemin_java_str.to_str().expect("UTF-8 valide"))
 }
 
+/// Télécharge l'APK de mise à jour vers `destination`. Fine couche au-dessus
+/// de `telechargement::telecharger_depuis` (même boucle, mêmes garanties :
+/// fichier `.tmp` puis renommage atomique, nettoyage sur erreur) — séparée
+/// uniquement pour nommer explicitement ce que fait ce message côté worker,
+/// et pour que les tests de ce module l'exercent sans dépendre du type
+/// `PaletteModele` qu'utilise `telecharger_modele`. Platform-agnostique :
+/// aucun appel réseau n'est déclenché ici tant que personne n'envoie
+/// `MessageVersWorker::TelechargerMiseAJour` (desktop ne l'envoie jamais,
+/// voir `gerer_telecharger_mise_a_jour` plus bas).
+fn telecharger_mise_a_jour(
+    url: &str,
+    destination: &Path,
+    sur_progression: &mut dyn FnMut(f32),
+) -> Result<(), crate::telechargement::ErreurTelechargement> {
+    crate::telechargement::telecharger_depuis(url, destination, sur_progression)
+}
+
 #[cfg(feature = "plateforme-desktop")]
 pub fn repertoire_sauvegardes_par_defaut() -> PathBuf {
     PathBuf::from("sauvegardes")
@@ -64,6 +81,81 @@ pub fn repertoire_modeles_par_defaut() -> PathBuf {
 #[cfg(feature = "plateforme-android")]
 pub fn repertoire_modeles_par_defaut() -> PathBuf {
     repertoire_donnees_app().join("modeles")
+}
+
+/// Destination de l'APK de mise à jour téléchargé. Sur Android, à
+/// l'intérieur du répertoire de stockage privé de l'app — c'est aussi le
+/// chemin que `FileProvider`/`file_paths.xml` (Task 3) doit exposer pour
+/// que l'intent `ACTION_VIEW` d'installation Android puisse lire ce
+/// fichier ; seule cette fonction décide du chemin, Task 3 n'a qu'à la
+/// réutiliser plutôt que de reconstruire le chemin de son côté. Sur
+/// desktop, un chemin relatif équivalent existe par simple symétrie avec
+/// `repertoire_modeles_par_defaut`/`repertoire_sauvegardes_par_defaut`
+/// ci-dessus — rien ne l'atteint jamais en pratique puisque l'UI
+/// desktop n'a aucun moyen d'envoyer `MessageVersWorker::TelechargerMiseAJour`
+/// (la bannière ne quitte `EtatBanniereMaj::Masquee` que si le worker
+/// envoie `MiseAJourDisponible`, ce qu'il ne fait que sous
+/// `plateforme-android` — voir le démarrage de `lancer()` plus bas).
+#[cfg(feature = "plateforme-android")]
+fn chemin_apk_mise_a_jour() -> PathBuf {
+    repertoire_donnees_app().join("maj").join("narrateur.apk")
+}
+
+#[cfg(feature = "plateforme-desktop")]
+fn chemin_apk_mise_a_jour() -> PathBuf {
+    PathBuf::from("maj").join("narrateur.apk")
+}
+
+/// Vérification fire-and-forget appelée une seule fois, juste après le
+/// premier `ListeHistoires` envoyé par `lancer()` (voir plus bas). Android
+/// seulement : desktop ne doit gagner aucun nouvel appel réseau (Global
+/// Constraint du plan de mise à jour), donc la branche desktop retourne
+/// toujours `None` sans jamais appeler `verifier_disponibilite`. Cette
+/// fonction existe (plutôt qu'un `#[cfg]` directement sur l'appel dans
+/// `lancer()`) pour que la construction de `MessageVersUi::MiseAJourDisponible`
+/// reste écrite une seule fois, de façon inconditionnelle, et ne soit donc
+/// jamais signalée comme code mort sur un build desktop.
+#[cfg(feature = "plateforme-android")]
+fn verifier_mise_a_jour_au_demarrage() -> Option<crate::mise_a_jour::InfoMiseAJour> {
+    crate::mise_a_jour::verifier_disponibilite(crate::mise_a_jour::ADRESSE_MAJ_PAR_DEFAUT)
+}
+
+#[cfg(feature = "plateforme-desktop")]
+fn verifier_mise_a_jour_au_demarrage() -> Option<crate::mise_a_jour::InfoMiseAJour> {
+    None
+}
+
+/// Traite les deux messages de mise à jour, quel que soit le point
+/// d'attente de `rx.recv()` d'où ils arrivent (la bannière de mise à jour
+/// reste visible au-dessus de n'importe quel écran — sélection, création,
+/// confirmation de téléchargement de modèle, ou partie en cours — donc ces
+/// messages peuvent survenir depuis chacune des boucles de réception de
+/// `lancer()`/`jouer_histoire`, pas seulement depuis `traiter_message`).
+/// Platform-agnostique à dessein (comme `telecharger_mise_a_jour`
+/// ci-dessus) plutôt que gatée Android : la Global Constraint du plan
+/// est « zéro nouvel appel réseau sur desktop », pas « zéro nouveau code
+/// compilé » — et desktop ne déclenche jamais réellement cet appel
+/// puisque rien n'y envoie jamais `TelechargerMiseAJour` (voir le
+/// commentaire de `chemin_apk_mise_a_jour` ci-dessus). Rester
+/// platform-agnostique évite aussi de laisser les variantes
+/// `MessageVersUi::{ProgressionMiseAJour, MiseAJourTelechargee,
+/// MiseAJourEchouee}` inutilisées (donc des avertissements de code mort)
+/// sur un build desktop.
+fn gerer_telecharger_mise_a_jour(tx: &futures_channel::mpsc::UnboundedSender<MessageVersUi>, url_apk: &str) {
+    let destination = chemin_apk_mise_a_jour();
+    let resultat = telecharger_mise_a_jour(url_apk, &destination, &mut |progression| {
+        let _ = tx.unbounded_send(MessageVersUi::ProgressionMiseAJour(progression));
+    });
+    match resultat {
+        Ok(()) => {
+            let _ = tx.unbounded_send(MessageVersUi::MiseAJourTelechargee {
+                chemin_apk: destination.to_string_lossy().into_owned(),
+            });
+        }
+        Err(erreur) => {
+            let _ = tx.unbounded_send(MessageVersUi::MiseAJourEchouee(format!("{erreur:?}")));
+        }
+    }
 }
 
 /// Construit l'état initial d'une nouvelle histoire (personnage, sans
@@ -216,16 +308,23 @@ pub fn traiter_message(
         // `CreerPersonnage` sont consommés par la boucle externe de
         // `lancer()` avant qu'une histoire soit chargée ; `RetourSelection`
         // par `jouer_histoire` ; `ConfirmerTelechargement` par `lancer()`
-        // pendant le téléchargement ; et `DeLancee` par la boucle
-        // d'attente de `GenerateurDeJoueur::lancer`. L'exhaustivité du
-        // `match` impose ces bras.
+        // pendant le téléchargement ; `DeLancee` par la boucle d'attente de
+        // `GenerateurDeJoueur::lancer` ; et `TelechargerMiseAJour`/
+        // `InstallerMiseAJour` sont interceptés en amont, dans chacune des
+        // boucles de réception de `lancer()`/`jouer_histoire` elles-mêmes
+        // (la bannière de mise à jour reste visible au-dessus de n'importe
+        // quel écran, donc ces deux messages doivent être traités quel que
+        // soit l'état en cours, pas seulement pendant une partie). L'exhaustivité
+        // du `match` impose ces bras malgré tout.
         MessageVersWorker::ReprendreHistoire(_)
         | MessageVersWorker::SupprimerHistoire(_)
         | MessageVersWorker::DemarrerCreationPersonnage
         | MessageVersWorker::CreerPersonnage { .. }
         | MessageVersWorker::RetourSelection
         | MessageVersWorker::DeLancee
-        | MessageVersWorker::ConfirmerTelechargement(_) => {}
+        | MessageVersWorker::ConfirmerTelechargement(_)
+        | MessageVersWorker::TelechargerMiseAJour { .. }
+        | MessageVersWorker::InstallerMiseAJour { .. } => {}
     }
 }
 
@@ -249,6 +348,17 @@ fn jouer_histoire(
     loop {
         match rx.recv() {
             Ok(MessageVersWorker::RetourSelection) => return ActionApresHistoire::RetourSelection,
+            // Interceptés ici plutôt que transmis à `traiter_message` : la
+            // bannière de mise à jour reste affichée au-dessus de l'écran
+            // de jeu, donc ces messages peuvent arriver en pleine partie.
+            Ok(MessageVersWorker::TelechargerMiseAJour { url_apk }) => {
+                gerer_telecharger_mise_a_jour(tx, &url_apk);
+            }
+            Ok(MessageVersWorker::InstallerMiseAJour { chemin_apk }) => {
+                // Stub narrow : Task 3 implémentera le déclenchement réel
+                // de l'installation Android. Volontairement vide ici.
+                let _ = chemin_apk;
+            }
             Ok(message) => traiter_message(etat, message, narrateur, &mut de_joueur, de_monde, contexte, &mut |msg| {
                 let _ = tx.unbounded_send(msg);
             }),
@@ -263,9 +373,25 @@ pub fn lancer(
     repertoire_sauvegardes: PathBuf,
     repertoire_modeles: PathBuf,
 ) {
+    // Fire-and-forget : vérifiée une seule fois, juste après le premier
+    // `ListeHistoires` envoyé ci-dessous — pas à chaque retour à la
+    // sélection (suppression d'histoire, fin de partie, etc.), seulement
+    // au tout premier lancement de `lancer()`.
+    let mut premier_passage = true;
+
     'selection: loop {
         let histoires_existantes = histoires::lister(&repertoire_sauvegardes);
         let _ = tx.unbounded_send(MessageVersUi::ListeHistoires(histoires_existantes.clone()));
+
+        if premier_passage {
+            premier_passage = false;
+            if let Some(info) = verifier_mise_a_jour_au_demarrage() {
+                let _ = tx.unbounded_send(MessageVersUi::MiseAJourDisponible {
+                    version: info.version,
+                    url_apk: info.url_apk,
+                });
+            }
+        }
 
         let (id, info, etat_initial, deja_enregistree) = loop {
             match rx.recv() {
@@ -327,6 +453,21 @@ pub fn lancer(
                     };
                     break (nouvel_id, info, etat, false);
                 }
+                // Interceptés ici aussi : la bannière de mise à jour reste
+                // affichée au-dessus de l'écran de sélection, donc
+                // l'utilisateur peut déclencher ces messages avant même
+                // d'avoir choisi une histoire.
+                Ok(MessageVersWorker::TelechargerMiseAJour { url_apk }) => {
+                    gerer_telecharger_mise_a_jour(&tx, &url_apk);
+                    continue;
+                }
+                Ok(MessageVersWorker::InstallerMiseAJour { chemin_apk }) => {
+                    // Stub narrow : Task 3 implémentera le déclenchement
+                    // réel de l'installation Android. Volontairement vide
+                    // ici.
+                    let _ = chemin_apk;
+                    continue;
+                }
                 Ok(_) => continue,
                 Err(_) => return,
             }
@@ -353,6 +494,19 @@ pub fn lancer(
             let confirme = loop {
                 match rx.recv() {
                     Ok(MessageVersWorker::ConfirmerTelechargement(reponse)) => break reponse,
+                    // Interceptés ici aussi, même raison que la boucle de
+                    // sélection ci-dessus : la bannière de mise à jour
+                    // reste affichée pendant cet écran de confirmation.
+                    Ok(MessageVersWorker::TelechargerMiseAJour { url_apk }) => {
+                        gerer_telecharger_mise_a_jour(&tx, &url_apk);
+                        continue;
+                    }
+                    Ok(MessageVersWorker::InstallerMiseAJour { chemin_apk }) => {
+                        // Stub narrow : Task 3 implémentera le
+                        // déclenchement réel de l'installation Android.
+                        let _ = chemin_apk;
+                        continue;
+                    }
                     Ok(_) => continue,
                     Err(_) => return,
                 }
@@ -464,6 +618,61 @@ mod tests {
         ));
         let _ = std::fs::remove_dir_all(&chemin);
         chemin
+    }
+
+    /// Serveur HTTP minimal sur la boucle locale, le temps d'une seule
+    /// requête — mirroir de `telechargement.rs::tests::servir_une_fois`
+    /// (pas réutilisable directement : privée à ce module), pour exercer
+    /// `telecharger_mise_a_jour` contre un vrai serveur local plutôt
+    /// qu'un mock.
+    fn servir_fichier_une_fois(corps: Vec<u8>) -> (String, std::thread::JoinHandle<()>) {
+        use std::io::{Read as _, Write as _};
+        let ecouteur =
+            std::net::TcpListener::bind("127.0.0.1:0").expect("écoute sur un port libre");
+        let adresse = ecouteur.local_addr().expect("adresse locale");
+        let fil = std::thread::spawn(move || {
+            let (mut flux, _) = ecouteur.accept().expect("connexion entrante");
+            let mut octet = [0u8; 1];
+            let mut fin = Vec::new();
+            while flux.read_exact(&mut octet).is_ok() {
+                fin.push(octet[0]);
+                if fin.ends_with(b"\r\n\r\n") {
+                    break;
+                }
+            }
+            let entetes = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                corps.len()
+            );
+            let _ = flux.write_all(entetes.as_bytes());
+            let _ = flux.write_all(&corps);
+            let _ = flux.flush();
+        });
+        (format!("http://{adresse}/narrateur.apk"), fil)
+    }
+
+    fn chemin_test_apk(nom: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "app_desktop_maj_{}_{}_{nom}.apk",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ))
+    }
+
+    #[test]
+    fn telecharger_mise_a_jour_ecrit_l_apk_et_signale_la_fin() {
+        let (url, fil) = servir_fichier_une_fois(b"contenu-apk-factice".to_vec());
+        let destination = chemin_test_apk("ecrit_et_signale");
+
+        let resultat = telecharger_mise_a_jour(&url, &destination, &mut |_| {});
+        fil.join().expect("fil serveur");
+
+        assert!(resultat.is_ok());
+        assert_eq!(std::fs::read(&destination).unwrap(), b"contenu-apk-factice");
+        let _ = std::fs::remove_file(&destination);
     }
 
     struct GenerateurDeFixe;

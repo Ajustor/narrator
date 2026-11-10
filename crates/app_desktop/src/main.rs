@@ -22,7 +22,8 @@ mod worker;
 use dioxus::prelude::*;
 use domain::Vainqueur;
 use futures_util::StreamExt;
-use protocole::{MessageVersUi, MessageVersWorker, Vue};
+use protocole::{EtatBanniereMaj, MessageVersUi, MessageVersWorker, Vue};
+use vues::banniere_maj::BanniereMiseAJour;
 use vues::confirmation_telechargement::ConfirmationTelechargement;
 use vues::creation::Creation;
 use vues::erreur_chargement::ErreurChargement;
@@ -141,6 +142,15 @@ fn App() -> Element {
     // à `None` à chaque nouvelle demande (`DeDemande`) pour ne jamais
     // montrer le résultat d'un jet précédent sur un dé qui attend encore.
     let mut dernier_resultat_de: Signal<Option<u32>> = use_signal(|| None);
+    // Bannière de mise à jour (Android seulement en pratique — voir
+    // `worker::lancer`, qui n'envoie `MiseAJourDisponible` que sous
+    // `plateforme-android` — mais ce signal et son rendu restent
+    // inconditionnels ici : rien ne distingue cet écran des autres
+    // superpositions, et `EtatBanniereMaj::Masquee` ne rend rien tant que
+    // le worker n'a rien signalé). Volontairement hors de `Vue` : la
+    // bannière doit rester visible au-dessus de n'importe quel écran, pas
+    // remplacer celui en cours.
+    let mut banniere_maj: Signal<EtatBanniereMaj> = use_signal(|| EtatBanniereMaj::Masquee);
 
     use_future(move || {
         let rx_partage = rx_partage.clone();
@@ -255,6 +265,18 @@ fn App() -> Element {
                 MessageVersUi::DeResultat(valeur) => {
                     dernier_resultat_de.set(Some(valeur));
                 }
+                MessageVersUi::MiseAJourDisponible { version, url_apk } => {
+                    banniere_maj.set(EtatBanniereMaj::Disponible { version, url_apk });
+                }
+                MessageVersUi::ProgressionMiseAJour(progression) => {
+                    banniere_maj.set(EtatBanniereMaj::EnTelechargement { progression });
+                }
+                MessageVersUi::MiseAJourTelechargee { chemin_apk } => {
+                    banniere_maj.set(EtatBanniereMaj::PreteAInstaller { chemin_apk });
+                }
+                MessageVersUi::MiseAJourEchouee(message) => {
+                    banniere_maj.set(EtatBanniereMaj::Echouee(message));
+                }
             }
         }
         // Le canal s'est fermé : le thread de jeu s'est arrêté de façon
@@ -265,6 +287,9 @@ fn App() -> Element {
         ));
         }
     });
+
+    let tx_telecharger = tx.clone();
+    let tx_installer = tx.clone();
 
     let vue_active = match vue() {
         Vue::ErreurChargement(message) => rsx! { ErreurChargement { message } },
@@ -337,6 +362,20 @@ fn App() -> Element {
 
     rsx! {
         document::Style { "{styles::CSS}" }
+        BanniereMiseAJour {
+            etat: banniere_maj(),
+            sur_telecharger: move |_| {
+                if let EtatBanniereMaj::Disponible { url_apk, .. } = banniere_maj() {
+                    let _ = tx_telecharger.send(MessageVersWorker::TelechargerMiseAJour { url_apk });
+                }
+            },
+            sur_installer: move |_| {
+                if let EtatBanniereMaj::PreteAInstaller { chemin_apk } = banniere_maj() {
+                    let _ = tx_installer.send(MessageVersWorker::InstallerMiseAJour { chemin_apk });
+                }
+            },
+            sur_ignorer: move |_| banniere_maj.set(EtatBanniereMaj::Masquee),
+        }
         {vue_active}
     }
 }

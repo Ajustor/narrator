@@ -427,4 +427,42 @@ html, body {
     font-size: 2rem;
     font-weight: 700;
 }
+
+.banniere-maj {
+    position: fixed;
+    left: 0;
+    right: 0;
+    top: 0;
+    z-index: 30;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    background: var(--bg-panel-alt);
+    border-bottom: 1px solid var(--accent-dim);
+    padding: 0.6rem 1rem;
+    font-size: 0.9rem;
+}
+
+.banniere-maj-erreur {
+    border-bottom-color: var(--danger);
+}
+
+.banniere-maj-texte {
+    color: var(--text);
+    flex: 1;
+    min-width: 0;
+}
+
+.banniere-maj-actions {
+    display: flex;
+    gap: 0.5rem;
+    flex-shrink: 0;
+}
+
+.banniere-maj-barre {
+    flex: 1;
+    max-width: 12rem;
+}
 "#;

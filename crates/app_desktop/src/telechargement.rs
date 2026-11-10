@@ -92,7 +92,7 @@ pub fn formater_taille_go(octets: u64) -> String {
 /// téléchargement (progression, nettoyage du `.tmp`, absence de
 /// `Content-Length`) contre un petit serveur local, sans transférer les
 /// ~2 Gio du vrai modèle.
-fn telecharger_depuis(
+pub(crate) fn telecharger_depuis(
     url: &str,
     chemin_destination: &Path,
     sur_progression: &mut dyn FnMut(f32),

@@ -1,3 +1,4 @@
+pub mod banniere_maj;
 pub mod confirmation_telechargement;
 pub mod creation;
 pub mod erreur_chargement;
