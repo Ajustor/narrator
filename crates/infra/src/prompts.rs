@@ -42,6 +42,9 @@ pub fn construire_prompt_classification(contexte: &ContexteTour) -> String {
          {}\
          {}\
          Le joueur dit : \"{}\"\n\
+         Dans sa saisie, le texte entre astérisques (*ainsi*) décrit un geste ou une action \
+         physique du joueur, et le texte sans astérisques est ce qu'il dit à voix haute ; \
+         tiens compte des deux sans les confondre (une action physique n'est pas une réplique).\n\
          Réponds uniquement par un objet JSON décrivant l'action correspondante, \
          sans aucun autre texte. Utilise exactement un de ces formats, \
          avec ces clés exactes (remplace seulement la valeur après les deux-points \
@@ -75,6 +78,9 @@ pub fn construire_prompt_narration(contexte: &ContexteResultat) -> String {
         "{}\
          {}\
          Le joueur a tenté : {:?}.\n\
+         Dans sa saisie, le texte entre astérisques (*ainsi*) décrit un geste ou une action \
+         physique du joueur, et le texte sans astérisques est ce qu'il dit à voix haute ; \
+         ne transforme pas une action physique en réplique citée.\n\
          Voici ce qui s'est réellement passé : {}\n\
          {}\
          Raconte cette scène de façon vivante et dramatique, en français, \
@@ -349,6 +355,27 @@ mod tests {
         };
         let prompt = construire_prompt_narration(&contexte);
         assert!(prompt.contains("Elowen"));
+    }
+
+    #[test]
+    fn le_prompt_de_classification_explique_la_convention_asterisque() {
+        let contexte = ContexteTour {
+            etat: etat_sans_combat(),
+            saisie_joueur: "*je dégaine mon épée*".to_string(),
+        };
+        let prompt = construire_prompt_classification(&contexte);
+        assert!(prompt.contains("astérisque"));
+    }
+
+    #[test]
+    fn le_prompt_de_narration_explique_la_convention_asterisque() {
+        let contexte = ContexteResultat {
+            etat: etat_sans_combat(),
+            action: ActionJoueur::ActionLibre { texte: "*je dégaine mon épée*".into(), agressif: false },
+            resume_mecanique: vec![],
+        };
+        let prompt = construire_prompt_narration(&contexte);
+        assert!(prompt.contains("astérisque"));
     }
 
     #[test]
