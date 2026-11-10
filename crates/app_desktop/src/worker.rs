@@ -159,6 +159,26 @@ fn gerer_telecharger_mise_a_jour(tx: &futures_channel::mpsc::UnboundedSender<Mes
     }
 }
 
+/// Pendant de `gerer_telecharger_mise_a_jour` pour `InstallerMiseAJour`,
+/// appelé depuis les mêmes quatre boucles de réception. Android : ouvre
+/// l'installeur système via `mise_a_jour::lancer_installation` et signale
+/// tout échec à l'UI par `MiseAJourEchouee` (la bannière reste alors
+/// affichée avec le message d'erreur). Un succès n'envoie rien : la main
+/// passe à l'installeur système, qui remplace l'app en place.
+#[cfg(feature = "plateforme-android")]
+fn gerer_installer_mise_a_jour(tx: &futures_channel::mpsc::UnboundedSender<MessageVersUi>, chemin_apk: &str) {
+    if let Err(erreur) = crate::mise_a_jour::lancer_installation(Path::new(chemin_apk)) {
+        let _ = tx.unbounded_send(MessageVersUi::MiseAJourEchouee(format!(
+            "échec du lancement de l'installation : {erreur}"
+        )));
+    }
+}
+
+/// Desktop : rien à installer — l'UI desktop n'atteint jamais l'état où
+/// elle enverrait `InstallerMiseAJour` (voir `chemin_apk_mise_a_jour`).
+#[cfg(feature = "plateforme-desktop")]
+fn gerer_installer_mise_a_jour(_tx: &futures_channel::mpsc::UnboundedSender<MessageVersUi>, _chemin_apk: &str) {}
+
 /// Construit l'état initial d'une nouvelle histoire (personnage, sans
 /// combat), sans rien écrire sur disque ni toucher à l'index — pure,
 /// testable isolément. `lancer()` s'occupe de la génération de l'id, de
@@ -251,10 +271,7 @@ impl GenerateurDe for GenerateurDeJoueur<'_> {
                     continue;
                 }
                 Ok(MessageVersWorker::InstallerMiseAJour { chemin_apk }) => {
-                    // Stub narrow : Task 3 implémentera le déclenchement
-                    // réel de l'installation Android. Volontairement vide
-                    // ici.
-                    let _ = chemin_apk;
+                    gerer_installer_mise_a_jour(self.tx, &chemin_apk);
                     continue;
                 }
                 // Rien d'autre n'est attendu pendant que l'UI n'affiche
@@ -373,9 +390,7 @@ fn jouer_histoire(
                 gerer_telecharger_mise_a_jour(tx, &url_apk);
             }
             Ok(MessageVersWorker::InstallerMiseAJour { chemin_apk }) => {
-                // Stub narrow : Task 3 implémentera le déclenchement réel
-                // de l'installation Android. Volontairement vide ici.
-                let _ = chemin_apk;
+                gerer_installer_mise_a_jour(tx, &chemin_apk);
             }
             Ok(message) => traiter_message(etat, message, narrateur, &mut de_joueur, de_monde, contexte, &mut |msg| {
                 let _ = tx.unbounded_send(msg);
@@ -480,10 +495,7 @@ pub fn lancer(
                     continue;
                 }
                 Ok(MessageVersWorker::InstallerMiseAJour { chemin_apk }) => {
-                    // Stub narrow : Task 3 implémentera le déclenchement
-                    // réel de l'installation Android. Volontairement vide
-                    // ici.
-                    let _ = chemin_apk;
+                    gerer_installer_mise_a_jour(&tx, &chemin_apk);
                     continue;
                 }
                 Ok(_) => continue,
@@ -520,9 +532,7 @@ pub fn lancer(
                         continue;
                     }
                     Ok(MessageVersWorker::InstallerMiseAJour { chemin_apk }) => {
-                        // Stub narrow : Task 3 implémentera le
-                        // déclenchement réel de l'installation Android.
-                        let _ = chemin_apk;
+                        gerer_installer_mise_a_jour(&tx, &chemin_apk);
                         continue;
                     }
                     Ok(_) => continue,
