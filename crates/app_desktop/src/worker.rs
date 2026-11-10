@@ -86,6 +86,7 @@ pub fn creer_nouvelle_histoire(
         combat_en_cours: None,
         resumes: Vec::new(),
         pnj_connus: Vec::new(),
+        premisse: Default::default(),
     })
 }
 
@@ -407,6 +408,7 @@ pub fn lancer(
             let resultat_intro = narrateur.raconter_introduction(
                 &etat_initial.personnage,
                 &etat_initial.lieu_actuel,
+                &etat_initial.premisse,
                 &mut |fragment: &str| {
                     let _ = tx.unbounded_send(MessageVersUi::NarrationFragment(fragment.to_string()));
                 },
@@ -528,6 +530,7 @@ mod tests {
             &mut self,
             _personnage: &domain::Personnage,
             _lieu: &str,
+            _premisse: &domain::PremisseHistoire,
             _sur_fragment: &mut dyn FnMut(&str),
         ) -> Result<String, application::ports::narrateur::ErreurNarrateur> {
             Ok(String::new())
@@ -553,6 +556,7 @@ mod tests {
             combat_en_cours: None,
             resumes: vec![],
             pnj_connus: vec![],
+            premisse: Default::default(),
         }
     }
 
@@ -625,6 +629,7 @@ mod tests {
             &mut self,
             _personnage: &domain::Personnage,
             _lieu: &str,
+            _premisse: &domain::PremisseHistoire,
             _sur_fragment: &mut dyn FnMut(&str),
         ) -> Result<String, application::ports::narrateur::ErreurNarrateur> {
             Ok(String::new())
@@ -700,6 +705,7 @@ mod tests {
             &mut self,
             _personnage: &domain::Personnage,
             _lieu: &str,
+            _premisse: &domain::PremisseHistoire,
             _sur_fragment: &mut dyn FnMut(&str),
         ) -> Result<String, application::ports::narrateur::ErreurNarrateur> {
             Ok(String::new())

@@ -4,7 +4,7 @@ use application::ports::narrateur::Narrateur;
 use application::ports::sauvegarde::ErreurSauvegarde;
 use application::usecases::jouer_tour::JouerTour;
 use application::usecases::partie::{charger_partie, sauvegarder_partie};
-use domain::{EtatPartie, Vainqueur};
+use domain::{EtatPartie, PremisseHistoire, Vainqueur};
 use infra::{GenerateurDeOs, LlamaNarrateur, SauvegardeFichier};
 use std::io::{self, Write};
 use std::path::PathBuf;
@@ -33,7 +33,12 @@ fn main() {
                 print!("{fragment}");
                 io::stdout().flush().ok();
             };
-            match narrateur.raconter_introduction(&personnage, "Clairière", &mut fragment_sortie) {
+            match narrateur.raconter_introduction(
+                &personnage,
+                "Clairière",
+                &PremisseHistoire::default(),
+                &mut fragment_sortie,
+            ) {
                 Ok(_) => println!(),
                 Err(erreur) => eprintln!("\n(échec de l'introduction narrée : {erreur:?})"),
             }
@@ -46,6 +51,7 @@ fn main() {
                 combat_en_cours: None,
                 resumes: Vec::new(),
                 pnj_connus: Vec::new(),
+                premisse: PremisseHistoire::default(),
             }
         }
         Err(ErreurSauvegarde::Lecture(message)) => {

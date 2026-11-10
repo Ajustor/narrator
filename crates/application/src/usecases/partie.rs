@@ -38,6 +38,7 @@ mod tests {
                 Caracteristiques { force: 12, dexterite: 14, constitution: 13, intelligence: 10, sagesse: 10, charisme: 8 },
                 vec![],
             ),
+            premisse: Default::default(),
             lieu_actuel: "Clairière".into(),
             combat_en_cours: None,
             resumes: vec![],

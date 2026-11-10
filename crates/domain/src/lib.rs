@@ -5,8 +5,10 @@ mod de;
 mod ennemi;
 mod etat_partie;
 mod fiche_pnj;
+mod genre;
 mod objet;
 mod personnage;
+mod premisse;
 
 pub use action_joueur::ActionJoueur;
 pub use caracteristiques::{modificateur, Caracteristiques};
@@ -15,5 +17,7 @@ pub use de::{De, JetDe};
 pub use ennemi::{gabarit_ennemi, Difficulte, Ennemi};
 pub use etat_partie::EtatPartie;
 pub use fiche_pnj::FichePnj;
+pub use genre::Genre;
 pub use objet::{EffetObjet, Objet};
 pub use personnage::Personnage;
+pub use premisse::PremisseHistoire;

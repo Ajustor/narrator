@@ -5,7 +5,7 @@ use crate::prompts::{
     construire_prompt_introduction, construire_prompt_narration,
 };
 use application::ports::narrateur::{ContexteResultat, ContexteTour, ErreurNarrateur, Narrateur, PnjDetecte};
-use domain::{ActionJoueur, Personnage};
+use domain::{ActionJoueur, Personnage, PremisseHistoire};
 use llama_cpp_2::context::params::LlamaContextParams;
 use llama_cpp_2::llama_backend::LlamaBackend;
 use llama_cpp_2::llama_batch::LlamaBatch;
@@ -229,9 +229,10 @@ impl Narrateur for LlamaNarrateur {
         &mut self,
         personnage: &Personnage,
         lieu: &str,
+        premisse: &PremisseHistoire,
         sur_fragment: &mut dyn FnMut(&str),
     ) -> Result<String, ErreurNarrateur> {
-        let prompt = construire_prompt_introduction(personnage, lieu);
+        let prompt = construire_prompt_introduction(personnage, lieu, premisse);
         self.generer(&prompt, TOKENS_MAX_NARRATION, None, sur_fragment)
             .map_err(ErreurNarrateur::EchecGeneration)
     }
@@ -264,6 +265,7 @@ mod tests {
             combat_en_cours: None,
             resumes: vec![],
             pnj_connus: vec![],
+            premisse: Default::default(),
         }
     }
 

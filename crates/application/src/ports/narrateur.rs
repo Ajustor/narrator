@@ -1,4 +1,4 @@
-use domain::{ActionJoueur, EtatPartie, Personnage};
+use domain::{ActionJoueur, EtatPartie, Personnage, PremisseHistoire};
 
 #[derive(Debug, Clone)]
 pub struct ContexteTour {
@@ -93,6 +93,7 @@ pub trait Narrateur: Send {
         &mut self,
         personnage: &Personnage,
         lieu: &str,
+        premisse: &PremisseHistoire,
         sur_fragment: &mut dyn FnMut(&str),
     ) -> Result<String, ErreurNarrateur>;
 }

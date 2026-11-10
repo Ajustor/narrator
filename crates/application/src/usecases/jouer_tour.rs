@@ -517,6 +517,7 @@ mod tests {
             combat_en_cours: None,
             resumes: vec![],
             pnj_connus: vec![],
+            premisse: Default::default(),
         }
     }
 
@@ -858,6 +859,7 @@ mod tests {
             &mut self,
             _personnage: &domain::Personnage,
             _lieu: &str,
+            _premisse: &domain::PremisseHistoire,
             sur_fragment: &mut dyn FnMut(&str),
         ) -> Result<String, ErreurNarrateur> {
             sur_fragment("introduction de test");
@@ -1070,6 +1072,7 @@ mod tests {
             &mut self,
             _personnage: &domain::Personnage,
             _lieu: &str,
+            _premisse: &domain::PremisseHistoire,
             _sur_fragment: &mut dyn FnMut(&str),
         ) -> Result<String, ErreurNarrateur> {
             Ok(String::new())
@@ -1112,6 +1115,7 @@ mod tests {
             &mut self,
             _personnage: &domain::Personnage,
             _lieu: &str,
+            _premisse: &domain::PremisseHistoire,
             _sur_fragment: &mut dyn FnMut(&str),
         ) -> Result<String, ErreurNarrateur> {
             Ok(String::new())
@@ -1152,6 +1156,7 @@ mod tests {
             &mut self,
             _personnage: &domain::Personnage,
             _lieu: &str,
+            _premisse: &domain::PremisseHistoire,
             _sur_fragment: &mut dyn FnMut(&str),
         ) -> Result<String, ErreurNarrateur> {
             Ok(String::new())

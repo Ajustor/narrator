@@ -1,14 +1,22 @@
 use application::ports::narrateur::{ContexteResultat, ContexteTour};
-use domain::{ActionJoueur, EffetObjet, EtatPartie, FichePnj, Personnage};
+use domain::{ActionJoueur, EffetObjet, EtatPartie, FichePnj, Personnage, PremisseHistoire};
 
-pub fn construire_prompt_introduction(personnage: &Personnage, lieu: &str) -> String {
+const LONGUEUR_MAX_PREMISSE: usize = 300;
+
+pub fn construire_prompt_introduction(personnage: &Personnage, lieu: &str, premisse: &PremisseHistoire) -> String {
+    let description = if premisse.description.is_empty() {
+        String::new()
+    } else {
+        format!(" {}", tronquer(&premisse.description, LONGUEUR_MAX_PREMISSE))
+    };
     format!(
         "Tu es le maître du jeu d'un jeu de rôle solo en français.\n\
+         L'histoire se déroule dans {}.{}\n\
          Un·e {} nommé·e {} arrive à {} pour commencer son aventure.\n\
          Décris cette arrivée et plante le décor du monde en français, en trois ou \
          quatre phrases, sans combat, sans dialogue et sans inventer de personnage \
          non-joueur : seulement l'ambiance, le lieu et ce qui s'y trouve.",
-        personnage.classe, personnage.nom, lieu,
+        premisse.genre.indication_prompt(), description, personnage.classe, personnage.nom, lieu,
     )
 }
 
@@ -77,6 +85,7 @@ pub fn construire_prompt_narration(contexte: &ContexteResultat) -> String {
     format!(
         "{}\
          {}\
+         {}\
          Le joueur a tenté : {:?}.\n\
          Dans sa saisie, le texte entre astérisques (*ainsi*) décrit un geste ou une action \
          physique du joueur, et le texte sans astérisques est ce qu'il dit à voix haute ; \
@@ -85,6 +94,7 @@ pub fn construire_prompt_narration(contexte: &ContexteResultat) -> String {
          {}\
          Raconte cette scène de façon vivante et dramatique, en français, \
          en deux ou trois phrases, sans jamais contredire ces faits ni inventer d'autres chiffres.",
+        description_premisse(&contexte.etat),
         description_memoire(&contexte.etat),
         description_pnj_pertinents(&contexte.etat, &contexte.action),
         contexte.action,
@@ -222,23 +232,52 @@ fn description_memoire(etat: &EtatPartie) -> String {
     }
 }
 
+/// Rappelle à chaque tour le genre et (si renseignée) la description libre
+/// de la prémisse choisie à la création de la partie, pour que le ton de
+/// l'histoire reste cohérent sur la durée, pas seulement à l'introduction.
+fn description_premisse(etat: &EtatPartie) -> String {
+    if etat.premisse.description.is_empty() {
+        format!("Contexte de l'histoire : {}.\n", etat.premisse.genre.indication_prompt())
+    } else {
+        format!(
+            "Contexte de l'histoire : {}. {}\n",
+            etat.premisse.genre.indication_prompt(),
+            tronquer(&etat.premisse.description, LONGUEUR_MAX_PREMISSE),
+        )
+    }
+}
+
+/// Tronque `s` à au plus `max` caractères (pas octets, pour rester valide
+/// sur une frontière UTF-8 même avec des caractères accentués).
+fn tronquer(s: &str, max: usize) -> &str {
+    match s.char_indices().nth(max) {
+        Some((idx, _)) => &s[..idx],
+        None => s,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use domain::{Caracteristiques, Combat, De, Ennemi, Objet, Personnage};
+    use domain::{Caracteristiques, Combat, De, Ennemi, Genre, Objet, Personnage};
+
+    fn personnage_test() -> Personnage {
+        Personnage::nouveau(
+            "Elowen".into(),
+            "Guerrier".into(),
+            Caracteristiques { force: 12, dexterite: 14, constitution: 13, intelligence: 10, sagesse: 10, charisme: 8 },
+            vec![],
+        )
+    }
 
     fn etat_sans_combat() -> EtatPartie {
         EtatPartie {
-            personnage: Personnage::nouveau(
-                "Elowen".into(),
-                "Guerrier".into(),
-                Caracteristiques { force: 12, dexterite: 14, constitution: 13, intelligence: 10, sagesse: 10, charisme: 8 },
-                vec![],
-            ),
+            personnage: personnage_test(),
             lieu_actuel: "Clairière".into(),
             combat_en_cours: None,
             resumes: vec![],
             pnj_connus: vec![],
+            premisse: Default::default(),
         }
     }
 
@@ -551,5 +590,32 @@ mod tests {
         let prompt = construire_prompt_detection_pnj("Peu importe.", &[]);
         assert!(prompt.contains(r#"{"pnj": null}"#));
         assert!(prompt.contains(r#"{"pnj": "Aldric", "description": "forgeron bourru et méfiant"}"#));
+    }
+
+    #[test]
+    fn le_prompt_d_introduction_mentionne_le_genre_et_la_premisse() {
+        let premisse = PremisseHistoire { genre: Genre::Horreur, description: "une vieille malédiction".into() };
+        let prompt = construire_prompt_introduction(&personnage_test(), "Clairière", &premisse);
+        assert!(prompt.contains("une vieille malédiction"));
+    }
+
+    #[test]
+    fn le_prompt_de_narration_rappelle_la_premisse_a_chaque_tour() {
+        let mut contexte = ContexteResultat {
+            etat: etat_sans_combat(),
+            action: ActionJoueur::ActionLibre { texte: "J'observe".into(), agressif: false },
+            resume_mecanique: vec![],
+        };
+        contexte.etat.premisse = PremisseHistoire { genre: Genre::Horreur, description: "une vieille malédiction".into() };
+        let prompt = construire_prompt_narration(&contexte);
+        assert!(prompt.contains("une vieille malédiction"));
+    }
+
+    #[test]
+    fn la_premisse_est_tronquee_a_300_caracteres_dans_le_prompt() {
+        let longue = "x".repeat(400);
+        let premisse = PremisseHistoire { genre: Genre::FantasyMedievale, description: longue };
+        let prompt = construire_prompt_introduction(&personnage_test(), "Clairière", &premisse);
+        assert!(!prompt.contains(&"x".repeat(301)));
     }
 }

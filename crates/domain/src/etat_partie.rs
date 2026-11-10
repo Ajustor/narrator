@@ -1,6 +1,7 @@
 use crate::combat::Combat;
 use crate::fiche_pnj::FichePnj;
 use crate::personnage::Personnage;
+use crate::premisse::PremisseHistoire;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -11,6 +12,8 @@ pub struct EtatPartie {
     pub resumes: Vec<String>,
     #[serde(default)]
     pub pnj_connus: Vec<FichePnj>,
+    #[serde(default)]
+    pub premisse: PremisseHistoire,
 }
 
 #[cfg(test)]
@@ -41,6 +44,7 @@ mod tests {
                 description: "forgeron bourru et méfiant".into(),
                 historique: vec!["Première rencontre à la forge.".into()],
             }],
+            premisse: PremisseHistoire::default(),
         }
     }
 
@@ -53,5 +57,15 @@ mod tests {
         assert_eq!(relu.lieu_actuel, etat.lieu_actuel);
         assert_eq!(relu.resumes, etat.resumes);
         assert_eq!(relu.pnj_connus, etat.pnj_connus);
+        assert_eq!(relu.premisse, etat.premisse);
+    }
+
+    #[test]
+    fn une_sauvegarde_sans_champ_premisse_se_relit_avec_la_valeur_par_defaut() {
+        let etat = etat_test();
+        let mut valeur = serde_json::to_value(&etat).unwrap();
+        valeur.as_object_mut().unwrap().remove("premisse"); // simule une sauvegarde plus ancienne
+        let relu: EtatPartie = serde_json::from_value(valeur).unwrap();
+        assert_eq!(relu.premisse, PremisseHistoire::default());
     }
 }

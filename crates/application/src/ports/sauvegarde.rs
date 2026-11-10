@@ -51,6 +51,7 @@ mod tests {
                 },
                 vec![],
             ),
+            premisse: Default::default(),
             lieu_actuel: "Clairière".into(),
             combat_en_cours: None,
             resumes: vec![],

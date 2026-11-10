@@ -1,5 +1,5 @@
 use application::ports::narrateur::{ContexteResultat, ContexteTour, ErreurNarrateur, Narrateur, PnjDetecte};
-use domain::{ActionJoueur, EffetObjet, Personnage};
+use domain::{ActionJoueur, EffetObjet, Personnage, PremisseHistoire};
 
 pub struct FauxNarrateur;
 
@@ -56,12 +56,20 @@ impl Narrateur for FauxNarrateur {
         &mut self,
         personnage: &Personnage,
         lieu: &str,
+        premisse: &PremisseHistoire,
         sur_fragment: &mut dyn FnMut(&str),
     ) -> Result<String, ErreurNarrateur> {
-        let narration = format!(
-            "{} arrive à {}, prêt·e à commencer son aventure.",
-            personnage.nom, lieu
-        );
+        let narration = if premisse.description.is_empty() {
+            format!(
+                "{} arrive à {}, prêt·e à commencer son aventure.",
+                personnage.nom, lieu
+            )
+        } else {
+            format!(
+                "{} arrive à {}, prêt·e à commencer son aventure : {}",
+                personnage.nom, lieu, premisse.description
+            )
+        };
         for mot in narration.split_inclusive(' ') {
             sur_fragment(mot);
         }
@@ -108,6 +116,7 @@ mod tests {
                 combat_en_cours: combat,
                 resumes: vec![],
                 pnj_connus: vec![],
+                premisse: Default::default(),
             },
             saisie_joueur: saisie.to_string(),
         }
@@ -201,5 +210,37 @@ mod tests {
         let mut narrateur = FauxNarrateur;
         let resultat = narrateur.detecter_pnj("Peu importe.", &[]).unwrap();
         assert_eq!(resultat, None);
+    }
+
+    #[test]
+    fn l_introduction_mentionne_la_description_de_la_premisse_si_presente() {
+        let personnage = Personnage::nouveau(
+            "Elowen".into(),
+            "Guerrier".into(),
+            Caracteristiques { force: 12, dexterite: 14, constitution: 13, intelligence: 10, sagesse: 10, charisme: 8 },
+            vec![],
+        );
+        let premisse = domain::PremisseHistoire {
+            genre: domain::Genre::Horreur,
+            description: "une vieille malédiction".into(),
+        };
+        let mut narrateur = FauxNarrateur;
+        let narration = narrateur.raconter_introduction(&personnage, "Clairière", &premisse, &mut |_| {}).unwrap();
+        assert!(narration.contains("une vieille malédiction"));
+    }
+
+    #[test]
+    fn l_introduction_ne_plante_pas_avec_une_premisse_par_defaut() {
+        let personnage = Personnage::nouveau(
+            "Elowen".into(),
+            "Guerrier".into(),
+            Caracteristiques { force: 12, dexterite: 14, constitution: 13, intelligence: 10, sagesse: 10, charisme: 8 },
+            vec![],
+        );
+        let mut narrateur = FauxNarrateur;
+        let narration = narrateur
+            .raconter_introduction(&personnage, "Clairière", &domain::PremisseHistoire::default(), &mut |_| {})
+            .unwrap();
+        assert!(narration.contains("Elowen"));
     }
 }
