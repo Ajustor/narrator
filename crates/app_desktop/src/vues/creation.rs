@@ -11,30 +11,40 @@ const NOMS_CARACTERISTIQUES: [&str; 6] =
 pub fn Creation(valeurs_proposees: [u32; 6], sur_creation: EventHandler<MessageVersWorker>) -> Element {
     let mut nom = use_signal(String::new);
     let mut classe = use_signal(|| CLASSES_VALIDES[0].to_string());
-    let mut valeurs = use_signal(|| [0u32; 6]);
+    // Pour chaque caractéristique (Force, Dextérité, ...), l'INDEX dans
+    // `valeurs_proposees` qui lui a été attribué (pas la valeur elle-même).
+    let mut origines = use_signal(|| [None::<usize>; 6]);
     let mut palette = use_signal(|| PaletteModele::Equilibre);
 
-    // Les valeurs tirées aléatoirement peuvent contenir des doublons (ex.
-    // deux "12"), contrairement à l'ancien tableau fixe — donc on ne peut
-    // plus exclure une valeur par simple égalité (ça retirerait TOUTES les
-    // occurrences dès qu'une seule est prise ailleurs, affamant les autres
-    // listes déroulantes). On retire une seule occurrence par emplacement
-    // déjà assigné : ce qui reste est le multi-ensemble réellement
-    // disponible pour cet emplacement.
-    let valeurs_disponibles = move |index_a_exclure: usize| -> Vec<u32> {
-        let valeurs_actuelles = valeurs();
-        let mut restantes: Vec<u32> = valeurs_proposees.to_vec();
-        for (i, v) in valeurs_actuelles.iter().enumerate() {
-            if i != index_a_exclure && *v != 0 {
-                if let Some(position) = restantes.iter().position(|x| x == v) {
-                    restantes.remove(position);
-                }
-            }
-        }
-        restantes
+    // Les origines (indices dans `valeurs_proposees`) encore disponibles
+    // pour la caractéristique `index_a_exclure` : tous les indices sauf
+    // ceux déjà attribués à une AUTRE caractéristique ; l'origine déjà
+    // choisie par `index_a_exclure` lui-même reste dans sa propre liste.
+    //
+    // On clé les <option> par cet index d'origine, stable, plutôt que par
+    // la valeur tirée ou par une position dans une liste filtrée (ancienne
+    // version) : retirer une valeur du pool partagé décalait les positions
+    // des options restantes dans TOUS les <select>, ce qui forçait Dioxus
+    // à recréer leurs nœuds <option> — et un <select> HTML réinitialise sa
+    // sélection à la première option quand l'option sélectionnée est
+    // recréée, sans que Dioxus ne réécrive `value` puisque cette prop-là
+    // n'avait, elle, pas changé. Résultat observé : choisir une
+    // caractéristique faisait disparaître celles déjà choisies. Avec une
+    // clé stable par origine, retirer une origine ailleurs ne touche plus
+    // aux options des autres <select>.
+    let origines_disponibles = move |index_a_exclure: usize| -> Vec<usize> {
+        let courantes = origines();
+        (0..valeurs_proposees.len())
+            .filter(|&o| {
+                !courantes
+                    .iter()
+                    .enumerate()
+                    .any(|(i, choix)| i != index_a_exclure && *choix == Some(o))
+            })
+            .collect()
     };
 
-    let toutes_valeurs_choisies = move || valeurs().iter().all(|v| *v != 0);
+    let toutes_valeurs_choisies = move || origines().iter().all(|o| o.is_some());
 
     rsx! {
         div { class: "ecran-centre",
@@ -85,20 +95,18 @@ pub fn Creation(valeurs_proposees: [u32; 6], sur_creation: EventHandler<MessageV
                     div { class: "champ",
                         label { "{label} : " }
                         select {
-                            value: "{valeurs()[index]}",
-                            onchange: move |evt| {
-                                let mut v = valeurs();
-                                v[index] = evt.value().parse().unwrap_or(0);
-                                valeurs.set(v);
+                            value: match origines()[index] {
+                                Some(o) => o.to_string(),
+                                None => String::new(),
                             },
-                            option { value: "0", "—" }
-                            for (position, valeur) in valeurs_disponibles(index).into_iter().enumerate() {
-                                // Les valeurs tirées aléatoirement peuvent se répéter (ex.
-                                // deux "10"), donc la valeur seule ne suffit plus comme clé
-                                // unique — contrairement à l'ancien tableau fixe, qui n'avait
-                                // jamais de doublon. `position` (l'index dans CETTE liste
-                                // déjà filtrée, recalculée à chaque rendu) la rend unique.
-                                option { key: "{position}-{valeur}", value: "{valeur}", "{valeur}" }
+                            onchange: move |evt| {
+                                let mut o = origines();
+                                o[index] = evt.value().parse().ok();
+                                origines.set(o);
+                            },
+                            option { value: "", "—" }
+                            for origine in origines_disponibles(index) {
+                                option { key: "{origine}", value: "{origine}", "{valeurs_proposees[origine]}" }
                             }
                         }
                     }
@@ -107,10 +115,11 @@ pub fn Creation(valeurs_proposees: [u32; 6], sur_creation: EventHandler<MessageV
                     class: "bouton-principal",
                     disabled: nom().trim().is_empty() || !toutes_valeurs_choisies(),
                     onclick: move |_| {
+                        let valeurs = origines().map(|o| o.map(|i| valeurs_proposees[i]).unwrap_or(0));
                         sur_creation.call(MessageVersWorker::CreerPersonnage {
                             nom: nom().trim().to_string(),
                             classe: classe(),
-                            valeurs: valeurs(),
+                            valeurs,
                             palette_modele: palette(),
                         });
                     },
