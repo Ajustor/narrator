@@ -3,6 +3,35 @@ use domain::{EtatPartie, Genre, Vainqueur};
 pub use crate::histoires::InfoHistoire;
 pub use crate::modeles::PaletteModele;
 
+/// Une ligne du journal affiché dans `Vue::Jeu` (voir `vues::jeu::Jeu`) —
+/// distingue ce que raconte le narrateur/le système de ce que le joueur a
+/// lui-même écrit, pour un affichage façon chat (bulles alignées à gauche
+/// ou à droite selon l'auteur). Seules les lignes ajoutées PENDANT la
+/// session en cours portent cette distinction : `EtatPartie::resumes`
+/// (relu depuis la sauvegarde à la reprise d'une histoire) ne contient que
+/// la narration — les anciens messages du joueur n'y ont jamais été
+/// enregistrés et redeviennent donc `Recit` au rechargement.
+#[derive(Debug, Clone, PartialEq)]
+pub enum LigneJournal {
+    Recit(String),
+    Joueur(String),
+}
+
+impl LigneJournal {
+    pub fn texte(&self) -> &str {
+        match self {
+            LigneJournal::Recit(texte) | LigneJournal::Joueur(texte) => texte,
+        }
+    }
+
+    pub fn classe(&self) -> &'static str {
+        match self {
+            LigneJournal::Recit(_) => "ligne-recit",
+            LigneJournal::Joueur(_) => "ligne-joueur",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum MessageVersWorker {
     ReprendreHistoire(String),

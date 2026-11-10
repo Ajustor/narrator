@@ -221,14 +221,36 @@ html, body {
     font-family: Georgia, "Times New Roman", serif;
     font-size: 1.05rem;
     line-height: 1.5;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
 }
 
 .journal p {
-    margin: 0 0 0.75rem 0;
+    margin: 0;
+    max-width: 75%;
+    padding: 0.6rem 0.9rem;
+    border-radius: 4px;
 }
 
-.journal .narration-en-cours {
+/* Récit du narrateur/système : bulle à gauche, comme un interlocuteur
+   différent du joueur dans une conversation de chat. Qualifiées par
+   `.journal` pour l'emporter sur `.journal p` ci-dessus (même nombre de
+   classes, donc plus spécifique grâce à ce sélecteur composé). */
+.journal .ligne-recit, .journal .narration-en-cours {
+    align-self: flex-start;
+    background: var(--bg-panel-alt);
     color: var(--text);
+    border-radius: 4px 12px 12px 12px;
+}
+
+/* Message du joueur : bulle à droite, dans l'accent de l'app, pour que ses
+   propres messages se distinguent d'un coup d'œil du récit. */
+.journal .ligne-joueur {
+    align-self: flex-end;
+    background: var(--accent-dim);
+    color: var(--text);
+    border-radius: 12px 4px 12px 12px;
 }
 
 .journal .avertissement {
