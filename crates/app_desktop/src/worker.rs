@@ -128,9 +128,10 @@ fn verifier_mise_a_jour_au_demarrage() -> Option<crate::mise_a_jour::InfoMiseAJo
 /// Traite les deux messages de mise à jour, quel que soit le point
 /// d'attente de `rx.recv()` d'où ils arrivent (la bannière de mise à jour
 /// reste visible au-dessus de n'importe quel écran — sélection, création,
-/// confirmation de téléchargement de modèle, ou partie en cours — donc ces
-/// messages peuvent survenir depuis chacune des boucles de réception de
-/// `lancer()`/`jouer_histoire`, pas seulement depuis `traiter_message`).
+/// confirmation de téléchargement de modèle, partie en cours, ou attente
+/// d'un jet de dé — donc ces messages peuvent survenir depuis chacune des
+/// quatre boucles de réception de `lancer()`/`jouer_histoire`/
+/// `GenerateurDeJoueur::lancer`, pas seulement depuis `traiter_message`).
 /// Platform-agnostique à dessein (comme `telecharger_mise_a_jour`
 /// ci-dessus) plutôt que gatée Android : la Global Constraint du plan
 /// est « zéro nouvel appel réseau sur desktop », pas « zéro nouveau code
@@ -239,9 +240,26 @@ impl GenerateurDe for GenerateurDeJoueur<'_> {
         loop {
             match self.rx.recv() {
                 Ok(MessageVersWorker::DeLancee) => break,
+                // Interceptés ici aussi, même raison que les trois autres
+                // boucles de réception de ce fichier : la bannière de mise
+                // à jour reste affichée même pendant l'attente d'un jet de
+                // dé (saisie désactivée, mais la bannière n'est pas une
+                // saisie de jeu), donc ces deux messages peuvent arriver
+                // ici aussi.
+                Ok(MessageVersWorker::TelechargerMiseAJour { url_apk }) => {
+                    gerer_telecharger_mise_a_jour(self.tx, &url_apk);
+                    continue;
+                }
+                Ok(MessageVersWorker::InstallerMiseAJour { chemin_apk }) => {
+                    // Stub narrow : Task 3 implémentera le déclenchement
+                    // réel de l'installation Android. Volontairement vide
+                    // ici.
+                    let _ = chemin_apk;
+                    continue;
+                }
                 // Rien d'autre n'est attendu pendant que l'UI n'affiche
                 // que le dé (saisie désactivée côté UI) — on ignore tout
-                // message inattendu plutôt que de planter.
+                // autre message inattendu plutôt que de planter.
                 Ok(_) => continue,
                 Err(_) => {
                     // Canal fermé en pleine attente d'un lancer :

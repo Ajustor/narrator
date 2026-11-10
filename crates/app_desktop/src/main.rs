@@ -151,6 +151,16 @@ fn App() -> Element {
     // bannière doit rester visible au-dessus de n'importe quel écran, pas
     // remplacer celui en cours.
     let mut banniere_maj: Signal<EtatBanniereMaj> = use_signal(|| EtatBanniereMaj::Masquee);
+    // `true` dès que l'utilisateur a explicitement ignoré la bannière
+    // (`sur_ignorer`) — tant que c'est le cas, les ticks de progression et
+    // le résultat (succès ou échec) du téléchargement EN COURS ne doivent
+    // plus la réafficher : sans ce garde-fou, `ProgressionTelechargement`/
+    // `MiseAJourEchouee` (envoyés par le worker indépendamment de l'état
+    // affiché côté UI) ré-écrasent `Masquee` dès le prochain pourcentage,
+    // annulant silencieusement l'ignorance. Remis à `false` seulement par
+    // une VRAIE nouvelle annonce (`MiseAJourDisponible`) — pas par ce même
+    // téléchargement en cours.
+    let mut banniere_ignoree = use_signal(|| false);
 
     use_future(move || {
         let rx_partage = rx_partage.clone();
@@ -266,16 +276,26 @@ fn App() -> Element {
                     dernier_resultat_de.set(Some(valeur));
                 }
                 MessageVersUi::MiseAJourDisponible { version, url_apk } => {
+                    // Une VRAIE nouvelle annonce : l'ignorance d'une
+                    // précédente bannière (s'il y en avait une) ne tient
+                    // plus face à une mise à jour différente.
+                    banniere_ignoree.set(false);
                     banniere_maj.set(EtatBanniereMaj::Disponible { version, url_apk });
                 }
                 MessageVersUi::ProgressionMiseAJour(progression) => {
-                    banniere_maj.set(EtatBanniereMaj::EnTelechargement { progression });
+                    if !banniere_ignoree() {
+                        banniere_maj.set(EtatBanniereMaj::EnTelechargement { progression });
+                    }
                 }
                 MessageVersUi::MiseAJourTelechargee { chemin_apk } => {
-                    banniere_maj.set(EtatBanniereMaj::PreteAInstaller { chemin_apk });
+                    if !banniere_ignoree() {
+                        banniere_maj.set(EtatBanniereMaj::PreteAInstaller { chemin_apk });
+                    }
                 }
                 MessageVersUi::MiseAJourEchouee(message) => {
-                    banniere_maj.set(EtatBanniereMaj::Echouee(message));
+                    if !banniere_ignoree() {
+                        banniere_maj.set(EtatBanniereMaj::Echouee(message));
+                    }
                 }
             }
         }
@@ -374,7 +394,10 @@ fn App() -> Element {
                     let _ = tx_installer.send(MessageVersWorker::InstallerMiseAJour { chemin_apk });
                 }
             },
-            sur_ignorer: move |_| banniere_maj.set(EtatBanniereMaj::Masquee),
+            sur_ignorer: move |_| {
+                banniere_ignoree.set(true);
+                banniere_maj.set(EtatBanniereMaj::Masquee);
+            },
         }
         {vue_active}
     }
