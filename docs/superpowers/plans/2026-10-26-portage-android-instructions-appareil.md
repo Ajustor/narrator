@@ -26,20 +26,37 @@ dx bundle --platform android --package-types apk --package app_desktop --target 
 construit pour l'architecture de la machine hôte (x86_64), et l'APK
 obtenue ne s'installe pas sur un téléphone.
 
-**Puis, pour que l'icône personnalisée soit bien dans l'APK** (voir la
-note dédiée plus bas — `dx` 0.7.9 ignore l'icône configurée pour Android
-et repose le gabarit par défaut à chaque invocation) :
+**Puis, pour que l'icône personnalisée et la mise à jour automatique
+fonctionnent toutes les deux** (voir les notes dédiées plus bas — `dx`
+0.7.9 ignore l'icône configurée pour Android et repose le gabarit par
+défaut à chaque invocation, et ne peut déclarer aucun `<provider>` ni
+ressource `res/xml/` de façon déclarative) :
 
 ```bash
 cd /home/alexandre/dev/narrator
 ./scripts/patch_icone_android.sh
+./scripts/patch_manifest_maj_android.sh
 cd target/dx/Narrator/debug/android/app
 ./gradlew assembleDebug
 ```
 
 Cette dernière étape (`gradlew`, pas `dx`) est ce qui produit l'APK final
 réellement installé — `dx bundle`/`dx build` seuls donneraient un APK
-avec l'icône Android par défaut.
+avec l'icône Android par défaut et sans le `FileProvider` nécessaire à la
+mise à jour automatique.
+
+**`patch_manifest_maj_android.sh` est nécessaire à la mise à jour
+automatique** (voir `docs/superpowers/plans/2026-11-10-maj-auto-android.md`) :
+il déclare le `FileProvider` et le `res/xml/file_paths.xml` qu'utilise
+`mise_a_jour::lancer_installation` pour ouvrir l'installeur système sur
+l'APK téléchargé. Même contrat que `patch_icone_android.sh` : `dx build`/
+`dx bundle` régénère le projet Android à CHAQUE invocation et efface ce
+patch, donc il faut le relancer après CHAQUE `dx build`/`dx bundle`, avant
+`gradlew`. Il est idempotent (le relancer sur un projet déjà patché ne
+change rien). Si on l'oublie, l'application ne plante pas : le bouton
+« Installer » de la bannière de mise à jour échoue avec un message
+d'erreur propre affiché dans l'app (`ExceptionJava`, typiquement une
+`IllegalArgumentException` sur le provider ou la méta-donnée manquante).
 
 ## Chemin de l'APK
 
@@ -187,6 +204,80 @@ Après installation et lancement, vérifier visuellement :
   (`libmain.so` en dépend via `DT_NEEDED`) ; si un rebuild incrémental la
   fait disparaître, supprimer `target/dx/Narrator/debug/android` et
   reconstruire proprement (puis réappliquer le patch d'icône)
+
+## Mise à jour automatique en réseau local (LAN)
+
+L'application vérifie au démarrage (Android seulement) si une version plus
+récente est disponible sur un serveur LAN, et propose de la télécharger
+puis de l'installer sans repasser par `adb install` — voir
+`docs/superpowers/plans/2026-11-10-maj-auto-android.md` pour la conception
+complète. Ceci documente ce que doit faire quiconque reconstruit et héberge
+une nouvelle version pour que cette mise à jour automatique fonctionne
+réellement (et ne se contente pas de réafficher indéfiniment la bannière).
+
+### 1. Ne pas oublier `patch_manifest_maj_android.sh`
+
+Voir la section « Commande de construction » plus haut : ce script doit
+être relancé après CHAQUE `dx build`/`dx bundle`, comme
+`patch_icone_android.sh`, avant `gradlew assembleDebug`/`assembleRelease`.
+L'oublier ne fait pas planter l'app — le bouton « Installer » échoue avec
+un message d'erreur propre affiché dans la bannière — mais la mise à jour
+reste alors impossible à installer depuis l'app.
+
+### 2. Générer `version.json` pour le build hébergé
+
+Le serveur LAN (celui interrogé via
+`mise_a_jour::ADRESSE_MAJ_PAR_DEFAUT`, `192.168.1.48:8000` par défaut) doit
+servir, **dans le même répertoire que l'APK à jour**, un fichier
+`version.json` de la forme :
+
+```json
+{"version": "<hash court du commit git EXACT depuis lequel l'APK a été construite>", "url": "<url de l'APK>"}
+```
+
+Le champ `version` doit être le hash court (`git rev-parse --short HEAD`,
+même format que `mise_a_jour::VERSION_ACTUELLE`, gravé par
+`crates/app_desktop/build.rs`) **du commit réellement utilisé pour cette
+build**, pas un numéro de version arbitraire. Concrètement :
+
+- **Commiter le travail AVANT de construire et d'héberger** — une build
+  faite depuis un arbre de travail avec des modifications non commitées
+  porte le même hash que le dernier commit, donc l'application ne
+  détectera jamais cette build « plus récente » comme différente (la
+  bannière ne s'affichera pas, silencieusement).
+- Récupérer le hash exact avec `git rev-parse --short HEAD` juste après
+  avoir commité et juste avant (ou juste après) la construction, et s'en
+  servir tel quel comme valeur de `version` dans `version.json`.
+
+### 3. Cohérence de signature entre deux builds
+
+L'installation d'une mise à jour par-dessus l'application déjà installée
+ne fonctionne QUE si les deux APK (l'ancienne installée et la nouvelle
+hébergée) sont signées avec la MÊME clé — sinon l'installeur système
+Android rejette silencieusement l'installation, sans que l'application
+puisse détecter ni afficher cet échec précis (il se passe hors de portée
+de l'app, dans l'UI système). Deux options :
+
+- **(a) Utiliser `assembleDebug`** (comme documenté dans ce fichier) :
+  signe automatiquement avec le keystore de debug local, le même à chaque
+  build sur la même machine — le cas simple, à préférer sauf besoin
+  explicite d'une build de release.
+- **(b) Utiliser `assembleRelease`** : le `build.gradle.kts` généré par
+  `dx` n'a par défaut aucun `signingConfig` pour la variante release (APK
+  produit non signé, `app-release-unsigned.apk`). Avant de lancer
+  `assembleRelease`, éditer manuellement ce `build.gradle.kts` généré pour
+  ajouter, dans le bloc `buildTypes { release { ... } }` :
+
+  ```kotlin
+  signingConfig = signingConfigs.getByName("debug")
+  ```
+
+  (le même edit manuel qu'il faut réappliquer à chaque régénération du
+  projet par `dx`, comme pour le patch d'icône et le patch de manifeste
+  ci-dessus). Quelle que soit l'option choisie, **l'application installée
+  et CHAQUE mise à jour suivante doivent utiliser la même option** — ne
+  pas alterner entre une build `assembleDebug` et une build
+  `assembleRelease` non signée avec la même clé.
 
 ## Signalement de problèmes
 
