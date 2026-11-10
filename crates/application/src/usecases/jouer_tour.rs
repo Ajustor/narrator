@@ -61,7 +61,7 @@ pub fn valider_action(action: &ActionJoueur, etat: &EtatPartie) -> Result<(), Er
                 Err(ErreurTour::AucunCombatEnCours)
             }
         }
-        ActionJoueur::ActionLibre(_) => Ok(()),
+        ActionJoueur::ActionLibre { .. } => Ok(()),
     }
 }
 
@@ -150,17 +150,23 @@ pub fn resoudre_action_joueur(
             }
             resume.push("🛡️ Tu te mets en garde, prêt à esquiver la prochaine attaque.".to_string());
         }
-        ActionJoueur::ActionLibre(texte) => {
+        ActionJoueur::ActionLibre { texte, agressif } => {
             // Avant, une action libre en combat n'avait AUCUN effet
             // mécanique (ni jet, ni dégâts), même quand le récit généré
             // décrivait quelque chose — c'est la cause du rapport « mes
-            // actions ne sont pas prises en compte ». Désormais, toute
-            // action créative pendant un combat actif devient une attaque
-            // improvisée réelle contre le premier ennemi vivant, avec
-            // désavantage (elle n'a pas la précision d'une vraie attaque).
-            // Hors combat, une action libre reste purement narrative.
+            // actions ne sont pas prises en compte ». Puis, toute action
+            // créative pendant un combat actif devenait une attaque
+            // improvisée réelle, même une action manifestement pacifique
+            // (négocier, observer...) — c'est maintenant corrigé : seule
+            // une action libre jugée agressive par le classificateur
+            // devient une attaque improvisée contre le premier ennemi
+            // vivant, avec désavantage (elle n'a pas la précision d'une
+            // vraie attaque) ; une action libre non-agressive en combat
+            // reste purement narrative, sans aucun jet de dé. Hors combat,
+            // une action libre reste toujours purement narrative, quelle
+            // que soit son agressivité.
             let combat_actif = etat.combat_en_cours.as_ref().map(|c| !c.termine).unwrap_or(false);
-            if combat_actif {
+            if combat_actif && *agressif {
                 let modificateur_attaque = modificateur(etat.personnage.caracteristiques.dexterite) + BONUS_MAITRISE;
                 let arme = etat.personnage.arme_equipee();
                 if let Some(combat) = etat.combat_en_cours.as_mut() {
@@ -192,6 +198,8 @@ pub fn resoudre_action_joueur(
                         }
                     }
                 }
+            } else if combat_actif && !*agressif {
+                resume.push(format!("💬 Tentative non-agressive : « {texte} »."));
             }
         }
     }
@@ -600,7 +608,10 @@ mod tests {
 
     #[test]
     fn action_libre_est_toujours_valide() {
-        let resultat = valider_action(&ActionJoueur::ActionLibre("Je regarde autour de moi".into()), &etat_sans_combat());
+        let resultat = valider_action(
+            &ActionJoueur::ActionLibre { texte: "Je regarde autour de moi".into(), agressif: false },
+            &etat_sans_combat(),
+        );
         assert_eq!(resultat, Ok(()));
     }
 
@@ -681,7 +692,11 @@ mod tests {
     fn action_libre_hors_combat_ne_consomme_aucun_de() {
         let mut etat = etat_sans_combat();
         let mut de = GenerateurDeSeed::nouveau(vec![]);
-        let resume = resoudre_action_joueur(&mut etat, &ActionJoueur::ActionLibre("J'observe".into()), &mut de);
+        let resume = resoudre_action_joueur(
+            &mut etat,
+            &ActionJoueur::ActionLibre { texte: "J'observe".into(), agressif: false },
+            &mut de,
+        );
         assert!(resume.is_empty());
     }
 
@@ -689,12 +704,17 @@ mod tests {
     fn action_libre_en_combat_devient_une_attaque_improvisee_qui_peut_infliger_des_degats() {
         // Avant cette correction, une action libre en combat n'avait
         // aucun effet mécanique — c'était le cœur du rapport « mes
-        // actions ne comptent pas ». Désavantage : deux jets, on garde le
-        // plus bas (10 < 15) => 10 + mod_dex(2) + maîtrise(2) = 14 >= 12
-        // (touché) ; dégâts d4=3.
+        // actions ne comptent pas ». Ici, l'action est agressive ("je lui
+        // jette du sable"), donc elle devient une attaque improvisée.
+        // Désavantage : deux jets, on garde le plus bas (10 < 15) => 10 +
+        // mod_dex(2) + maîtrise(2) = 14 >= 12 (touché) ; dégâts d4=3.
         let mut etat = etat_en_combat();
         let mut de = GenerateurDeSeed::nouveau(vec![10, 15, 3]);
-        let resume = resoudre_action_joueur(&mut etat, &ActionJoueur::ActionLibre("je lui jette du sable".into()), &mut de);
+        let resume = resoudre_action_joueur(
+            &mut etat,
+            &ActionJoueur::ActionLibre { texte: "je lui jette du sable".into(), agressif: true },
+            &mut de,
+        );
         let gobelin = &etat.combat_en_cours.as_ref().unwrap().ennemis[0];
         assert_eq!(gobelin.pv_actuels, 4); // 7 - 3
         assert!(resume[0].contains("touché"));
@@ -703,14 +723,46 @@ mod tests {
 
     #[test]
     fn action_libre_en_combat_rate_ne_lance_jamais_le_de_de_degats() {
-        // Désavantage : deux 5 => 5 + 2 + 2 = 9 < défense 12 (manqué). Un
-        // seul couple de valeurs programmé pour le jet d'attaque ; un
-        // troisième `.lancer()` pour des dégâts ferait paniquer
-        // `GenerateurDeSeed`.
+        // `agressif: true` ici pour exercer la branche d'attaque improvisée
+        // (le texte "je recule" sert juste de contenu de test, peu importe
+        // son agressivité réelle). Désavantage : deux 5 => 5 + 2 + 2 = 9 <
+        // défense 12 (manqué). Un seul couple de valeurs programmé pour le
+        // jet d'attaque ; un troisième `.lancer()` pour des dégâts ferait
+        // paniquer `GenerateurDeSeed`.
         let mut etat = etat_en_combat();
         let mut de = GenerateurDeSeed::nouveau(vec![5, 5]);
-        let resume = resoudre_action_joueur(&mut etat, &ActionJoueur::ActionLibre("je recule".into()), &mut de);
+        let resume = resoudre_action_joueur(
+            &mut etat,
+            &ActionJoueur::ActionLibre { texte: "je recule".into(), agressif: true },
+            &mut de,
+        );
         assert!(resume[0].contains("manqué"));
+    }
+
+    #[test]
+    fn action_libre_agressive_en_combat_devient_une_attaque_improvisee() {
+        let mut etat = etat_en_combat();
+        let mut de = GenerateurDeSeed::nouveau(vec![15, 15, 4]); // désavantage garde 15, dégâts 4
+        let resume = resoudre_action_joueur(
+            &mut etat,
+            &ActionJoueur::ActionLibre { texte: "je frappe avec une chaise".into(), agressif: true },
+            &mut de,
+        );
+        assert!(resume.iter().any(|l| l.contains("Tentative improvisée")));
+        assert!(etat.combat_en_cours.as_ref().unwrap().ennemis[0].pv_actuels < 7);
+    }
+
+    #[test]
+    fn action_libre_non_agressive_en_combat_ne_lance_aucun_de() {
+        let mut etat = etat_en_combat();
+        let mut de = GenerateurDeSeed::nouveau(vec![]); // doit paniquer si un dé est lancé
+        let resume = resoudre_action_joueur(
+            &mut etat,
+            &ActionJoueur::ActionLibre { texte: "je négocie avec le gobelin".into(), agressif: false },
+            &mut de,
+        );
+        assert_eq!(etat.combat_en_cours.as_ref().unwrap().ennemis[0].pv_actuels, 7);
+        assert!(resume.iter().any(|l| l.contains("non-agressive")));
     }
 
     #[test]
@@ -855,15 +907,14 @@ mod tests {
     fn jouer_tour_mort_du_joueur_termine_reellement_la_partie() {
         let mut etat = etat_en_combat();
         etat.personnage.subir_degats(etat.personnage.pv_max); // 0 PV
-        let mut narrateur = NarrateurDeTest { action: ActionJoueur::ActionLibre("j'observe".into()) };
+        let mut narrateur = NarrateurDeTest { action: ActionJoueur::ActionLibre { texte: "j'observe".into(), agressif: false } };
         // Le combat n'est pas encore flaggé `termine` au début de ce tour
         // (seul `terminer_si_joueur_mort`, appelé après le tour du
         // gobelin, le fera) : le tour se résout donc intégralement malgré
-        // les 0 PV déjà présents. Action libre en combat => attaque
-        // improvisée avec désavantage (deux 5 => total 9 < défense 12,
-        // manqué, sans incidence puisque le gobelin ne meurt pas ici) ;
-        // puis le gobelin attaque et termine la partie.
-        let mut de_joueur = GenerateurDeSeed::nouveau(vec![5, 5]);
+        // les 0 PV déjà présents. Action libre non-agressive en combat =>
+        // aucun jet côté joueur ; puis le gobelin attaque et termine la
+        // partie.
+        let mut de_joueur = GenerateurDeSeed::nouveau(vec![]);
         let mut de_monde = GenerateurDeSeed::nouveau(vec![10, 4]);
         let resultat = JouerTour::executer(&mut etat, "j'observe", &mut narrateur, &mut de_joueur, &mut de_monde, &mut |_| {}).unwrap();
         assert_eq!(resultat.vainqueur_combat, Some(Vainqueur::Ennemis));
@@ -878,11 +929,11 @@ mod tests {
     fn jouer_tour_ennemi_plus_rapide_agit_avant_le_joueur() {
         let mut etat = etat_en_combat();
         etat.combat_en_cours.as_mut().unwrap().initiatives_ennemis = vec![20]; // bien plus rapide que l'initiative du joueur (10)
-        let mut narrateur = NarrateurDeTest { action: ActionJoueur::ActionLibre("j'observe".into()) };
+        let mut narrateur = NarrateurDeTest { action: ActionJoueur::ActionLibre { texte: "j'observe".into(), agressif: false } };
         // ennemi: d20=10 + bonus_attaque 3 = 13 >= defense joueur 12 (touché) ; dégâts d6=4
-        // puis le joueur agit : action libre en combat => attaque improvisée
-        // avec désavantage (deux 5 => total 9 < défense 12, manqué).
-        let mut de_joueur = GenerateurDeSeed::nouveau(vec![5, 5]);
+        // puis le joueur agit : action libre non-agressive en combat =>
+        // aucun jet côté joueur.
+        let mut de_joueur = GenerateurDeSeed::nouveau(vec![]);
         let mut de_monde = GenerateurDeSeed::nouveau(vec![10, 4]);
         let resultat = JouerTour::executer(&mut etat, "j'observe", &mut narrateur, &mut de_joueur, &mut de_monde, &mut |_| {}).unwrap();
         assert_eq!(etat.personnage.pv_actuels, etat.personnage.pv_max - 4);
@@ -899,12 +950,12 @@ mod tests {
             combat.ennemis.push(Ennemi::nouveau("Gobelin B".into(), 7, De { faces: 6 }, 12, 2, 3));
             combat.initiatives_ennemis = vec![0, 18];
         }
-        let mut narrateur = NarrateurDeTest { action: ActionJoueur::ActionLibre("j'observe".into()) };
+        let mut narrateur = NarrateurDeTest { action: ActionJoueur::ActionLibre { texte: "j'observe".into(), agressif: false } };
         // ordre attendu : Ennemi(1) [Gobelin B], Joueur, Ennemi(0) [Gobelin A]
         // Gobelin B : d20=10+3=13>=12 touché, dégâts d6=2
-        // Joueur (action libre, désavantage) : deux 5 => 9<12 manqué
+        // Joueur (action libre non-agressive) : aucun jet
         // Gobelin A : d20=1 => échec critique automatique, pas de dégâts
-        let mut de_joueur = GenerateurDeSeed::nouveau(vec![5, 5]);
+        let mut de_joueur = GenerateurDeSeed::nouveau(vec![]);
         let mut de_monde = GenerateurDeSeed::nouveau(vec![10, 2, 1]);
         let resultat = JouerTour::executer(&mut etat, "j'observe", &mut narrateur, &mut de_joueur, &mut de_monde, &mut |_| {}).unwrap();
         assert_eq!(etat.personnage.pv_actuels, etat.personnage.pv_max - 2);
@@ -915,7 +966,7 @@ mod tests {
     #[test]
     fn jouer_tour_hors_combat_ne_signale_jamais_de_vainqueur() {
         let mut etat = etat_sans_combat();
-        let mut narrateur = NarrateurDeTest { action: ActionJoueur::ActionLibre("j'observe".into()) };
+        let mut narrateur = NarrateurDeTest { action: ActionJoueur::ActionLibre { texte: "j'observe".into(), agressif: false } };
         let mut de_joueur = GenerateurDeSeed::nouveau(vec![]);
         let mut de_monde = GenerateurDeSeed::nouveau(vec![]);
         let resultat = JouerTour::executer(&mut etat, "j'observe", &mut narrateur, &mut de_joueur, &mut de_monde, &mut |_| {}).unwrap();
@@ -937,11 +988,9 @@ mod tests {
     fn jouer_tour_declenche_la_rencontre_initiale_au_tout_premier_tour() {
         let mut etat = etat_sans_combat();
         etat.rencontre_initiale_declenchee = false;
-        let mut narrateur = NarrateurDeTest { action: ActionJoueur::ActionLibre("j'observe".into()) };
-        // de_joueur : action libre en combat => attaque improvisée avec
-        // désavantage (deux 5 => total 9, en-dessous de la défense du
-        // Gobelin 12 => manqué, sans incidence sur ce test).
-        let mut de_joueur = GenerateurDeSeed::nouveau(vec![5, 5]);
+        let mut narrateur = NarrateurDeTest { action: ActionJoueur::ActionLibre { texte: "j'observe".into(), agressif: false } };
+        // de_joueur : action libre non-agressive en combat => aucun jet.
+        let mut de_joueur = GenerateurDeSeed::nouveau(vec![]);
         // de_monde : initiative joueur (10), initiative gobelin (5) pour
         // `amorcer_rencontre_initiale`, puis attaque (1, échec critique
         // automatique, pas de jet de dégâts) du gobelin qui agit ensuite
@@ -960,11 +1009,10 @@ mod tests {
     fn jouer_tour_ne_redeclenche_pas_la_rencontre_si_deja_amorcee() {
         let mut etat = etat_en_combat(); // rencontre_initiale_declenchee: true (fixture)
         let pv_gobelin_avant = etat.combat_en_cours.as_ref().unwrap().ennemis[0].pv_actuels;
-        let mut narrateur = NarrateurDeTest { action: ActionJoueur::ActionLibre("j'observe".into()) };
-        // Action libre en combat => attaque improvisée avec désavantage,
-        // volontairement ratée (deux 5 => 9 < défense 12) pour ne pas
-        // affecter les PV du gobelin, seule chose vérifiée par ce test.
-        let mut de_joueur = GenerateurDeSeed::nouveau(vec![5, 5]);
+        let mut narrateur = NarrateurDeTest { action: ActionJoueur::ActionLibre { texte: "j'observe".into(), agressif: false } };
+        // Action libre non-agressive en combat => aucun jet, donc aucune
+        // incidence sur les PV du gobelin, seule chose vérifiée par ce test.
+        let mut de_joueur = GenerateurDeSeed::nouveau(vec![]);
         // Puis le gobelin agit (joueur plus rapide par défaut) : d20=1 =>
         // échec critique automatique, pas de jet de dégâts. Si la
         // rencontre se redéclenchait, `commencer_combat` consommerait deux
@@ -1022,7 +1070,7 @@ mod tests {
 
     impl Narrateur for NarrateurCondensateur {
         fn proposer_action(&mut self, _contexte: &ContexteTour) -> Result<ActionJoueur, ErreurNarrateur> {
-            Ok(ActionJoueur::ActionLibre("j'observe".into()))
+            Ok(ActionJoueur::ActionLibre { texte: "j'observe".into(), agressif: false })
         }
 
         fn raconter_resultat(
@@ -1063,7 +1111,7 @@ mod tests {
 
     impl Narrateur for NarrateurDetectionPnj {
         fn proposer_action(&mut self, _contexte: &ContexteTour) -> Result<ActionJoueur, ErreurNarrateur> {
-            Ok(ActionJoueur::ActionLibre("j'observe".into()))
+            Ok(ActionJoueur::ActionLibre { texte: "j'observe".into(), agressif: false })
         }
 
         fn raconter_resultat(
@@ -1104,7 +1152,7 @@ mod tests {
     #[test]
     fn jouer_tour_ajoute_la_narration_aux_resumes() {
         let mut etat = etat_sans_combat();
-        let mut narrateur = NarrateurDeTest { action: ActionJoueur::ActionLibre("j'observe".into()) };
+        let mut narrateur = NarrateurDeTest { action: ActionJoueur::ActionLibre { texte: "j'observe".into(), agressif: false } };
         let mut de_joueur = GenerateurDeSeed::nouveau(vec![]);
         let mut de_monde = GenerateurDeSeed::nouveau(vec![]);
         JouerTour::executer(&mut etat, "j'observe", &mut narrateur, &mut de_joueur, &mut de_monde, &mut |_| {}).unwrap();
@@ -1189,7 +1237,7 @@ mod tests {
         let mut etat = etat_sans_combat();
         etat.resumes = (0..NB_RESUMES_RECENTS_CONSERVES + 2).map(|_| resume_de_n_mots(10)).collect();
         let resumes_avant = etat.resumes.clone();
-        let mut narrateur = NarrateurDeTest { action: ActionJoueur::ActionLibre("j'observe".into()) };
+        let mut narrateur = NarrateurDeTest { action: ActionJoueur::ActionLibre { texte: "j'observe".into(), agressif: false } };
         let mut de_joueur = GenerateurDeSeed::nouveau(vec![]);
         let mut de_monde = GenerateurDeSeed::nouveau(vec![]);
         JouerTour::executer(&mut etat, "j'observe", &mut narrateur, &mut de_joueur, &mut de_monde, &mut |_| {}).unwrap();

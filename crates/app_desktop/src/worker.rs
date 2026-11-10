@@ -503,7 +503,7 @@ mod tests {
             &mut self,
             _contexte: &application::ports::narrateur::ContexteTour,
         ) -> Result<domain::ActionJoueur, application::ports::narrateur::ErreurNarrateur> {
-            Ok(domain::ActionJoueur::ActionLibre("j'observe".into()))
+            Ok(domain::ActionJoueur::ActionLibre { texte: "j'observe".into(), agressif: false })
         }
 
         fn raconter_resultat(
@@ -676,7 +676,7 @@ mod tests {
             &mut self,
             _contexte: &application::ports::narrateur::ContexteTour,
         ) -> Result<domain::ActionJoueur, application::ports::narrateur::ErreurNarrateur> {
-            Ok(domain::ActionJoueur::ActionLibre("j'observe".into()))
+            Ok(domain::ActionJoueur::ActionLibre { texte: "j'observe".into(), agressif: false })
         }
 
         fn raconter_resultat(
@@ -749,11 +749,10 @@ mod tests {
         etat_en_combat.personnage.subir_degats(etat_en_combat.personnage.pv_max);
         let mut etat: Option<EtatPartie> = Some(etat_en_combat);
         let mut narrateur = NarrateurMort;
-        // Une action libre en combat devient une attaque improvisée avec
-        // désavantage (deux 5 => total 9 < défense 12 du gobelin, manqué,
-        // sans incidence sur ce test) ; l'ennemi agit ensuite (attaque
-        // puis dégâts) via `de_monde`.
-        let mut de_joueur = GenerateurDeSeedLocal::nouveau(vec![5, 5]);
+        // Une action libre non-agressive en combat ne lance aucun dé côté
+        // joueur ; l'ennemi agit ensuite (attaque puis dégâts) via
+        // `de_monde`.
+        let mut de_joueur = GenerateurDeSeedLocal::nouveau(vec![]);
         let mut de_monde = GenerateurDeSeedLocal::nouveau(vec![10, 4]);
         let mut messages_envoyes = Vec::new();
         let contexte = ContexteHistoire {

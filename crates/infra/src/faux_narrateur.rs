@@ -13,15 +13,15 @@ impl Narrateur for FauxNarrateur {
         let action = if saisie_minuscule.contains("attaque") || saisie_minuscule.contains("frappe") {
             trouver_premier_ennemi_vivant(contexte)
                 .map(|nom| ActionJoueur::Attaquer { cible: nom })
-                .unwrap_or_else(|| ActionJoueur::ActionLibre(contexte.saisie_joueur.clone()))
+                .unwrap_or_else(|| ActionJoueur::ActionLibre { texte: contexte.saisie_joueur.clone(), agressif: false })
         } else if saisie_minuscule.contains("potion") || saisie_minuscule.contains("soin") {
             trouver_premiere_potion(contexte)
                 .map(|nom| ActionJoueur::UtiliserObjet { objet: nom })
-                .unwrap_or_else(|| ActionJoueur::ActionLibre(contexte.saisie_joueur.clone()))
+                .unwrap_or_else(|| ActionJoueur::ActionLibre { texte: contexte.saisie_joueur.clone(), agressif: false })
         } else if saisie_minuscule.contains("fui") || saisie_minuscule.contains("fuite") {
             ActionJoueur::Fuir
         } else {
-            ActionJoueur::ActionLibre(contexte.saisie_joueur.clone())
+            ActionJoueur::ActionLibre { texte: contexte.saisie_joueur.clone(), agressif: false }
         };
 
         Ok(action)
@@ -155,7 +155,7 @@ mod tests {
         let ctx = contexte("J'observe les environs", None);
         let mut narrateur = FauxNarrateur;
         let action = narrateur.proposer_action(&ctx).unwrap();
-        assert_eq!(action, ActionJoueur::ActionLibre("J'observe les environs".into()));
+        assert_eq!(action, ActionJoueur::ActionLibre { texte: "J'observe les environs".into(), agressif: false });
     }
 
     #[test]
@@ -163,7 +163,7 @@ mod tests {
         let ctx = contexte("peu importe", None);
         let ctx_resultat = ContexteResultat {
             etat: ctx.etat,
-            action: ActionJoueur::ActionLibre("J'observe".into()),
+            action: ActionJoueur::ActionLibre { texte: "J'observe".into(), agressif: false },
             resume_mecanique: vec![],
         };
         let mut narrateur = FauxNarrateur;

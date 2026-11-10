@@ -13,6 +13,18 @@ pub fn construire_prompt_introduction(personnage: &Personnage, lieu: &str) -> St
 }
 
 pub fn construire_prompt_classification(contexte: &ContexteTour) -> String {
+    let combat_actif = contexte.etat.combat_en_cours.as_ref().map(|c| !c.termine).unwrap_or(false);
+    let (exemple_libre, instruction_agressif): (&str, &str) = if combat_actif {
+        (
+            "{\"action\": \"libre\", \"agressif\": true|false}",
+            "Pour une action libre en combat, \"agressif\": true signifie une action \
+             physiquement hostile (frapper, lancer quelque chose, charger), et \
+             \"agressif\": false signifie une action non-violente (parler, négocier, \
+             observer, se cacher...).\n",
+        )
+    } else {
+        ("{\"action\": \"libre\"}", "")
+    };
     format!(
         "Tu es le maître du jeu d'un jeu de rôle solo en français.\n\
          Le joueur se trouve à : {}.\n\
@@ -27,11 +39,14 @@ pub fn construire_prompt_classification(contexte: &ContexteTour) -> String {
          {{\"action\": \"utiliser_objet\", \"objet\": \"NomDeLObjet\"}}\n\
          {{\"action\": \"fuir\"}}\n\
          {{\"action\": \"esquiver\"}}\n\
-         {{\"action\": \"libre\"}}",
+         {}\n\
+         {}",
         contexte.etat.lieu_actuel,
         description_combat(&contexte.etat),
         description_personnage(&contexte.etat),
         contexte.saisie_joueur,
+        exemple_libre,
+        instruction_agressif,
     )
 }
 
@@ -152,7 +167,7 @@ fn description_combat(etat: &EtatPartie) -> String {
 }
 
 fn description_pnj_pertinents(etat: &EtatPartie, action: &ActionJoueur) -> String {
-    let ActionJoueur::ActionLibre(texte) = action else {
+    let ActionJoueur::ActionLibre { texte, .. } = action else {
         return String::new();
     };
     let texte_minuscule = texte.to_lowercase();
@@ -267,7 +282,7 @@ mod tests {
     fn le_prompt_de_narration_gere_un_resume_vide_sans_paniquer() {
         let contexte = ContexteResultat {
             etat: etat_sans_combat(),
-            action: ActionJoueur::ActionLibre("J'observe".into()),
+            action: ActionJoueur::ActionLibre { texte: "J'observe".into(), agressif: false },
             resume_mecanique: vec![],
         };
         let prompt = construire_prompt_narration(&contexte);
@@ -288,7 +303,7 @@ mod tests {
     fn le_prompt_de_narration_mentionne_le_nom_du_personnage() {
         let contexte = ContexteResultat {
             etat: etat_sans_combat(),
-            action: ActionJoueur::ActionLibre("J'observe".into()),
+            action: ActionJoueur::ActionLibre { texte: "J'observe".into(), agressif: false },
             resume_mecanique: vec![],
         };
         let prompt = construire_prompt_narration(&contexte);
@@ -338,7 +353,7 @@ mod tests {
         etat.personnage.subir_degats(3);
         let contexte = ContexteResultat {
             etat: etat.clone(),
-            action: ActionJoueur::ActionLibre("J'observe".into()),
+            action: ActionJoueur::ActionLibre { texte: "J'observe".into(), agressif: false },
             resume_mecanique: vec![],
         };
         let prompt = construire_prompt_narration(&contexte);
@@ -379,7 +394,7 @@ mod tests {
         etat.resumes = vec!["Elowen a quitté le village.".to_string()];
         let contexte = ContexteResultat {
             etat,
-            action: ActionJoueur::ActionLibre("J'observe".into()),
+            action: ActionJoueur::ActionLibre { texte: "J'observe".into(), agressif: false },
             resume_mecanique: vec![],
         };
         let prompt = construire_prompt_narration(&contexte);
@@ -390,7 +405,7 @@ mod tests {
     fn le_prompt_de_narration_ne_mentionne_pas_de_memoire_si_resumes_est_vide() {
         let contexte = ContexteResultat {
             etat: etat_sans_combat(),
-            action: ActionJoueur::ActionLibre("J'observe".into()),
+            action: ActionJoueur::ActionLibre { texte: "J'observe".into(), agressif: false },
             resume_mecanique: vec![],
         };
         let prompt = construire_prompt_narration(&contexte);
@@ -407,7 +422,7 @@ mod tests {
         });
         let contexte = ContexteResultat {
             etat,
-            action: ActionJoueur::ActionLibre("Je parle à Aldric".into()),
+            action: ActionJoueur::ActionLibre { texte: "Je parle à Aldric".into(), agressif: false },
             resume_mecanique: vec![],
         };
         let prompt = construire_prompt_narration(&contexte);
@@ -425,7 +440,7 @@ mod tests {
         });
         let contexte = ContexteResultat {
             etat,
-            action: ActionJoueur::ActionLibre("Je regarde le ciel".into()),
+            action: ActionJoueur::ActionLibre { texte: "Je regarde le ciel".into(), agressif: false },
             resume_mecanique: vec![],
         };
         let prompt = construire_prompt_narration(&contexte);
@@ -442,7 +457,7 @@ mod tests {
         });
         let contexte = ContexteResultat {
             etat,
-            action: ActionJoueur::ActionLibre("Je parle à Aldric".into()),
+            action: ActionJoueur::ActionLibre { texte: "Je parle à Aldric".into(), agressif: false },
             resume_mecanique: vec![],
         };
         let prompt = construire_prompt_narration(&contexte);

@@ -114,9 +114,31 @@ pub fn interpreter_json_action(json_brut: &str) -> Result<domain::ActionJoueur, 
         "esquiver" => Ok(ActionJoueur::Esquiver),
         "libre" => {
             let texte = valeur.get("texte").and_then(Value::as_str).unwrap_or("").to_string();
-            Ok(ActionJoueur::ActionLibre(texte))
+            let agressif = valeur.get("agressif").and_then(Value::as_bool).unwrap_or(false);
+            Ok(ActionJoueur::ActionLibre { texte, agressif })
         }
         autre => Err(ErreurInterpretation(format!("action inconnue : {autre}"))),
+    }
+}
+
+/// Convertit la sortie brute du modèle en `ActionJoueur`, avec repli sur une
+/// action libre non-agressive si le JSON est invalide ou décrit une action
+/// hors schéma. Le modèle n'est jamais chargé de produire le champ "texte"
+/// pour une action libre (voir le commentaire dans
+/// `LlamaNarrateur::proposer_action`) : on substitue donc toujours la
+/// saisie verbatim du joueur à la place, qu'il s'agisse d'une action
+/// "libre" reconnue ou d'un repli — en conservant dans les deux cas le
+/// `agressif` réellement déterminé (`false` par défaut pour un repli).
+/// Toute autre action reconnue (attaquer, fuir, esquiver, utiliser_objet)
+/// traverse sans changement.
+pub fn interpreter_ou_repli_libre(json_brut: &str, saisie_joueur: &str) -> domain::ActionJoueur {
+    let action = interpreter_json_action(json_brut)
+        .unwrap_or(domain::ActionJoueur::ActionLibre { texte: String::new(), agressif: false });
+    match action {
+        domain::ActionJoueur::ActionLibre { agressif, .. } => {
+            domain::ActionJoueur::ActionLibre { texte: saisie_joueur.to_string(), agressif }
+        }
+        autre => autre,
     }
 }
 
@@ -312,7 +334,37 @@ mod tests {
     #[test]
     fn interprete_une_action_libre() {
         let action = interpreter_json_action(r#"{"action":"libre","texte":"J'observe"}"#).unwrap();
-        assert_eq!(action, ActionJoueur::ActionLibre("J'observe".into()));
+        assert_eq!(action, ActionJoueur::ActionLibre { texte: "J'observe".into(), agressif: false });
+    }
+
+    #[test]
+    fn interprete_une_action_libre_agressive() {
+        let action = interpreter_json_action(r#"{"action":"libre","texte":"je frappe","agressif":true}"#).unwrap();
+        assert_eq!(action, ActionJoueur::ActionLibre { texte: "je frappe".into(), agressif: true });
+    }
+
+    #[test]
+    fn interprete_une_action_libre_sans_champ_agressif_defaut_a_false() {
+        let action = interpreter_json_action(r#"{"action":"libre","texte":"j'observe"}"#).unwrap();
+        assert_eq!(action, ActionJoueur::ActionLibre { texte: "j'observe".into(), agressif: false });
+    }
+
+    #[test]
+    fn repli_sur_json_invalide_devient_une_action_libre_non_agressive() {
+        let action = interpreter_ou_repli_libre("ceci n'est pas du json", "je tente autre chose");
+        assert_eq!(action, ActionJoueur::ActionLibre { texte: "je tente autre chose".into(), agressif: false });
+    }
+
+    #[test]
+    fn repli_sur_action_hors_schema_devient_une_action_libre_non_agressive() {
+        let action = interpreter_ou_repli_libre(r#"{"action":"preparer_sort"}"#, "je prépare une boule de feu");
+        assert_eq!(action, ActionJoueur::ActionLibre { texte: "je prépare une boule de feu".into(), agressif: false });
+    }
+
+    #[test]
+    fn une_action_reconnue_n_est_pas_affectee_par_le_repli() {
+        let action = interpreter_ou_repli_libre(r#"{"action":"fuir"}"#, "peu importe");
+        assert_eq!(action, ActionJoueur::Fuir);
     }
 
     #[test]

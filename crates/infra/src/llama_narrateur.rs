@@ -1,4 +1,4 @@
-use crate::action_schema::interpreter_json_action;
+use crate::action_schema::interpreter_ou_repli_libre;
 use crate::detection_pnj::interpreter_json_detection_pnj;
 use crate::prompts::{
     construire_prompt_classification, construire_prompt_condensation, construire_prompt_detection_pnj,
@@ -192,18 +192,13 @@ impl Narrateur for LlamaNarrateur {
         let json_brut = self
             .generer(&prompt, TOKENS_MAX_CLASSIFICATION, None, &mut |_| {})
             .map_err(ErreurNarrateur::EchecGeneration)?;
-        let action =
-            interpreter_json_action(&json_brut).unwrap_or(ActionJoueur::ActionLibre(String::new()));
         // Le modèle n'est jamais chargé de reformuler la saisie du joueur : le
         // schéma JSON pour la variante "libre" ne contient plus de champ
         // "texte" (voir Fix 4), donc on substitue ici la saisie réelle du
         // joueur, verbatim — comme le fait déjà `FauxNarrateur`. Ceci couvre
-        // aussi le cas de repli ci-dessus (sortie JSON non reconnue).
-        let action = match action {
-            ActionJoueur::ActionLibre(_) => ActionJoueur::ActionLibre(contexte.saisie_joueur.clone()),
-            autre => autre,
-        };
-        Ok(action)
+        // aussi le cas de repli (sortie JSON invalide ou hors schéma) ;
+        // voir `interpreter_ou_repli_libre`.
+        Ok(interpreter_ou_repli_libre(&json_brut, &contexte.saisie_joueur))
     }
 
     fn raconter_resultat(

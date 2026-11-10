@@ -6,5 +6,5 @@ pub enum ActionJoueur {
     /// Se mettre en garde : jusqu'à sa prochaine action, les attaques
     /// ennemies contre le joueur sont faites avec désavantage.
     Esquiver,
-    ActionLibre(String),
+    ActionLibre { texte: String, agressif: bool },
 }
