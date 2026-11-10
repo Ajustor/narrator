@@ -1,6 +1,21 @@
 use crate::de::De;
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Difficulte {
+    Faible,
+    Moyen,
+    Fort,
+}
+
+pub fn gabarit_ennemi(nom: String, difficulte: Difficulte) -> Ennemi {
+    match difficulte {
+        Difficulte::Faible => Ennemi::nouveau(nom, 4, De { faces: 4 }, 10, 1, 1),
+        Difficulte::Moyen => Ennemi::nouveau(nom, 7, De { faces: 6 }, 12, 2, 3),
+        Difficulte::Fort => Ennemi::nouveau(nom, 12, De { faces: 8 }, 14, 3, 5),
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Ennemi {
     pub nom: String,
@@ -59,5 +74,31 @@ mod tests {
         gobelin.subir_degats(100);
         assert_eq!(gobelin.pv_actuels, 0);
         assert!(gobelin.est_mort());
+    }
+
+    #[test]
+    fn gabarit_ennemi_faible_a_les_stats_du_palier_faible() {
+        let e = gabarit_ennemi("Rat".into(), Difficulte::Faible);
+        assert_eq!((e.pv_max, e.degats, e.defense, e.bonus_initiative, e.bonus_attaque),
+            (4, De { faces: 4 }, 10, 1, 1));
+    }
+
+    #[test]
+    fn gabarit_ennemi_moyen_reprend_les_stats_de_l_ancien_gobelin() {
+        let e = gabarit_ennemi("Gobelin".into(), Difficulte::Moyen);
+        assert_eq!((e.pv_max, e.degats, e.defense, e.bonus_initiative, e.bonus_attaque),
+            (7, De { faces: 6 }, 12, 2, 3));
+    }
+
+    #[test]
+    fn gabarit_ennemi_fort_a_les_stats_du_palier_fort() {
+        let e = gabarit_ennemi("Ogre".into(), Difficulte::Fort);
+        assert_eq!((e.pv_max, e.degats, e.defense, e.bonus_initiative, e.bonus_attaque),
+            (12, De { faces: 8 }, 14, 3, 5));
+    }
+
+    #[test]
+    fn gabarit_ennemi_garde_le_nom_donne() {
+        assert_eq!(gabarit_ennemi("Loup".into(), Difficulte::Faible).nom, "Loup");
     }
 }

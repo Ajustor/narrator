@@ -12,7 +12,7 @@ pub use action_joueur::ActionJoueur;
 pub use caracteristiques::{modificateur, Caracteristiques};
 pub use combat::{attaque_touche, evaluer_jet_attaque, Acteur, Combat, ResultatJetAttaque, Vainqueur, BONUS_MAITRISE};
 pub use de::{De, JetDe};
-pub use ennemi::Ennemi;
+pub use ennemi::{gabarit_ennemi, Difficulte, Ennemi};
 pub use etat_partie::EtatPartie;
 pub use fiche_pnj::FichePnj;
 pub use objet::{EffetObjet, Objet};
