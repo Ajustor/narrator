@@ -618,4 +618,50 @@ mod tests {
         let prompt = construire_prompt_introduction(&personnage_test(), "Clairière", &premisse);
         assert!(!prompt.contains(&"x".repeat(301)));
     }
+
+    #[test]
+    fn la_troncature_reste_sur_une_frontiere_de_caractere_avec_des_accents() {
+        // "é" est un caractère multi-octets en UTF-8 (2 octets) : si la
+        // troncature tranchait par octet plutôt que par caractère, couper
+        // au milieu d'un "é" panique (slice index not on char boundary).
+        // Ce test ne doit donc pas paniquer, et doit tronquer exactement à
+        // 300 caractères (pas 300 octets).
+        let longue = "é".repeat(400);
+        let premisse = PremisseHistoire { genre: Genre::FantasyMedievale, description: longue };
+        let prompt = construire_prompt_introduction(&personnage_test(), "Clairière", &premisse);
+        assert!(prompt.contains(&"é".repeat(300)));
+        assert!(!prompt.contains(&"é".repeat(301)));
+    }
+
+    #[test]
+    fn une_premisse_d_exactement_300_caracteres_n_est_pas_tronquee() {
+        let description = "y".repeat(300);
+        let premisse = PremisseHistoire { genre: Genre::FantasyMedievale, description: description.clone() };
+        let prompt = construire_prompt_introduction(&personnage_test(), "Clairière", &premisse);
+        // Les 300 caractères doivent apparaître intacts : si `tronquer`
+        // coupait un caractère trop tôt à la frontière exacte, cette
+        // chaîne complète de 300 "y" ne s'y trouverait plus.
+        assert!(prompt.contains(&description));
+    }
+
+    #[test]
+    fn la_premisse_est_tronquee_dans_le_rappel_de_narration_a_chaque_tour() {
+        // `description_premisse` (rappel à chaque tour, dans
+        // `construire_prompt_narration`) a son propre appel à `tronquer`,
+        // distinct de celui de `construire_prompt_introduction` — ce test
+        // l'exerce spécifiquement avec une description longue, là où
+        // `le_prompt_de_narration_rappelle_la_premisse_a_chaque_tour`
+        // n'utilise qu'une description courte et ne passe jamais par le
+        // chemin de troncature.
+        let longue = "z".repeat(400);
+        let mut contexte = ContexteResultat {
+            etat: etat_sans_combat(),
+            action: ActionJoueur::ActionLibre { texte: "J'observe".into(), agressif: false },
+            resume_mecanique: vec![],
+        };
+        contexte.etat.premisse = PremisseHistoire { genre: Genre::FantasyMedievale, description: longue.clone() };
+        let prompt = construire_prompt_narration(&contexte);
+        assert!(!prompt.contains(&longue));
+        assert!(!prompt.contains(&"z".repeat(301)));
+    }
 }
