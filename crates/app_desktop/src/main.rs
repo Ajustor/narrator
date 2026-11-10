@@ -11,6 +11,7 @@ compile_error!("les features plateforme-desktop et plateforme-android sont mutue
 compile_error!("une feature de plateforme (plateforme-desktop ou plateforme-android) doit être activée");
 
 mod histoires;
+mod mise_a_jour;
 mod modeles;
 mod protocole;
 mod styles;
