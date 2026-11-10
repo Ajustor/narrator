@@ -619,7 +619,11 @@ mod tests {
             &mut self,
             _contexte: &application::ports::narrateur::ContexteTour,
         ) -> Result<domain::ActionJoueur, application::ports::narrateur::ErreurNarrateur> {
-            Ok(domain::ActionJoueur::Attaquer { cible: "Gobelin".into() })
+            // `Attaquer` hors combat n'échoue plus (voir `JouerTour::executer`,
+            // qui retombe désormais sur `ProvoquerCombat`) : on utilise ici un
+            // objet absent de l'inventaire pour continuer à exercer le chemin
+            // `TourEchoue` de `traiter_message`.
+            Ok(domain::ActionJoueur::UtiliserObjet { objet: "Objet inexistant".into() })
         }
 
         fn raconter_resultat(

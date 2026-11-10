@@ -2,8 +2,8 @@ use crate::ports::generateur_de::GenerateurDe;
 use crate::ports::narrateur::{ContexteResultat, ContexteTour, ErreurNarrateur, Narrateur};
 use crate::usecases::commencer_combat::commencer_combat;
 use domain::{
-    evaluer_jet_attaque, gabarit_ennemi, modificateur, ActionJoueur, Acteur, De, EffetObjet, EtatPartie, FichePnj,
-    JetDe, Vainqueur, BONUS_MAITRISE,
+    evaluer_jet_attaque, gabarit_ennemi, modificateur, ActionJoueur, Acteur, De, Difficulte, EffetObjet, EtatPartie,
+    FichePnj, JetDe, Vainqueur, BONUS_MAITRISE,
 };
 
 // SEUIL_MOTS_RESUMES est choisi pour rester largement sous TAILLE_CONTEXTE
@@ -68,8 +68,9 @@ pub fn valider_action(action: &ActionJoueur, etat: &EtatPartie) -> Result<(), Er
 
 /// Lance un dé avec désavantage (D&D : deux jets, on garde le total le plus
 /// bas) — utilisé pour les attaques ennemies pendant qu'une esquive du
-/// joueur est active, et pour toute action libre du joueur en combat (une
-/// tentative improvisée n'a pas la précision d'une vraie attaque).
+/// joueur est active, et pour une action libre *agressive* du joueur en
+/// combat (une tentative improvisée n'a pas la précision d'une vraie
+/// attaque) ; une action libre non-agressive en combat ne lance aucun dé.
 fn lancer_desavantage(de: &mut dyn GenerateurDe, type_de: De, modificateur: i32) -> JetDe {
     let premier = de.lancer(type_de, modificateur);
     let second = de.lancer(type_de, modificateur);
@@ -212,12 +213,40 @@ pub fn resoudre_action_joueur(
                 etat.combat_en_cours = Some(combat);
                 resume.push(format!("⚔️ {ennemi} surgit et t'attaque !"));
             } else {
-                resume.extend(resoudre_action_joueur(
-                    etat,
-                    &ActionJoueur::Attaquer { cible: ennemi.clone() },
-                    de,
-                    de_monde,
-                ));
+                // Un combat est déjà actif : `ennemi` est censé nommer un
+                // adversaire déjà engagé, mais un petit modèle local peut se
+                // tromper de nom (ex. "Loup" alors que le combat oppose un
+                // "Gobelin"). `valider_action` accepte toujours
+                // "provoquer_combat" sans vérifier `ennemi`, donc le garde-fou
+                // `CibleInvalide` qui protège une vraie `Attaquer` ne joue
+                // jamais ici — sans ce rattrapage, `Attaquer` ci-dessous ne
+                // trouverait aucune cible via `trouver_ennemi_vivant_mut` et
+                // ne pousserait rien au résumé : un tour silencieusement
+                // perdu. On retombe donc sur le premier ennemi vivant du
+                // combat en cours quand le nom proposé ne correspond à
+                // personne (même repli que pour l'attaque improvisée d'une
+                // action libre agressive, plus haut dans cette fonction).
+                let cible_nommee_existe = etat
+                    .combat_en_cours
+                    .as_ref()
+                    .map(|c| c.ennemis.iter().any(|e| &e.nom == ennemi && !e.est_mort()))
+                    .unwrap_or(false);
+                let cible = if cible_nommee_existe {
+                    Some(ennemi.clone())
+                } else {
+                    etat.combat_en_cours
+                        .as_ref()
+                        .and_then(|c| c.ennemis.iter().find(|e| !e.est_mort()))
+                        .map(|e| e.nom.clone())
+                };
+                if let Some(cible) = cible {
+                    resume.extend(resoudre_action_joueur(
+                        etat,
+                        &ActionJoueur::Attaquer { cible },
+                        de,
+                        de_monde,
+                    ));
+                }
             }
         }
     }
@@ -422,6 +451,23 @@ impl JouerTour {
         let action_proposee = narrateur
             .proposer_action(&contexte_tour)
             .map_err(message_echec_narrateur)?;
+
+        // Filet de sécurité mécanique : le prompt de classification
+        // (`construire_prompt_classification` dans `infra`) ne propose
+        // désormais "attaquer" que lorsqu'un combat est déjà actif, mais un
+        // petit modèle local (ex. 3B quantifié) ne suit pas toujours le
+        // schéma à la lettre. Si le narrateur répond quand même "attaquer"
+        // alors qu'aucun combat n'est en cours, on retombe sur
+        // "provoquer_combat" plutôt que de laisser `valider_action` rejeter
+        // ce qui était, de l'intention du joueur, un déclenchement de
+        // combat — l'intention la plus courante derrière "j'attaque X" en
+        // dehors d'un combat.
+        let action_proposee = match action_proposee {
+            ActionJoueur::Attaquer { cible } if etat.combat_en_cours.is_none() => {
+                ActionJoueur::ProvoquerCombat { ennemi: cible, difficulte: Difficulte::Faible }
+            }
+            autre => autre,
+        };
 
         valider_action(&action_proposee, etat)?;
 
@@ -827,6 +873,30 @@ mod tests {
         assert!(!resume.is_empty());
     }
 
+    #[test]
+    fn provoquer_combat_avec_un_nom_d_ennemi_errone_attaque_l_ennemi_reel_au_lieu_de_ne_rien_faire() {
+        // Le combat en cours oppose un "Gobelin", mais le modèle propose
+        // "provoquer_combat" avec `ennemi: "Loup"` (nom qui ne correspond à
+        // aucun combattant réel). Avant ce correctif, le code recourait
+        // toujours à `Attaquer { cible: ennemi.clone() }`, qui échoue à
+        // trouver "Loup" via `trouver_ennemi_vivant_mut`, lance tout de même
+        // le dé d'attaque, puis ne pousse RIEN au résumé — un tour
+        // silencieusement perdu. Le rattrapage doit retomber sur le premier
+        // ennemi vivant (le Gobelin) et produire un résumé non vide.
+        let mut etat = etat_en_combat(); // contient un "Gobelin", pas de "Loup"
+        let mut de_joueur = GenerateurDeSeed::nouveau(vec![15, 4]); // attaque, dégâts
+        let mut de_monde = GenerateurDeSeed::nouveau(vec![]);
+        let resume = resoudre_action_joueur(
+            &mut etat,
+            &ActionJoueur::ProvoquerCombat { ennemi: "Loup".into(), difficulte: domain::Difficulte::Faible },
+            &mut de_joueur,
+            &mut de_monde,
+        );
+        assert!(!resume.is_empty(), "le tour ne doit pas être silencieusement perdu");
+        assert!(resume.iter().any(|l| l.contains("Gobelin")), "l'attaque doit viser l'ennemi réel (Gobelin)");
+        assert_eq!(etat.combat_en_cours.as_ref().unwrap().ennemis.len(), 1); // pas de "Loup" ajouté
+    }
+
     use crate::ports::narrateur::{ContexteResultat, ContexteTour, ErreurNarrateur, Narrateur, PnjDetecte};
 
     struct NarrateurDeTest {
@@ -1018,12 +1088,39 @@ mod tests {
 
     #[test]
     fn jouer_tour_rejette_une_action_invalide_sans_consommer_de_de() {
+        // `Attaquer` hors combat n'est plus un cas rejeté ici : voir
+        // `jouer_tour_attaquer_hors_combat_demarre_un_combat_au_lieu_d_echouer`
+        // ci-dessous, qui couvre précisément ce rattrapage. `UtiliserObjet`
+        // avec un objet absent de l'inventaire reste, lui, toujours invalide.
         let mut etat = etat_sans_combat();
-        let mut narrateur = NarrateurDeTest { action: ActionJoueur::Attaquer { cible: "Gobelin".into() } };
+        let mut narrateur = NarrateurDeTest { action: ActionJoueur::UtiliserObjet { objet: "Objet inexistant".into() } };
         let mut de_joueur = GenerateurDeSeed::nouveau(vec![]);
         let mut de_monde = GenerateurDeSeed::nouveau(vec![]);
-        let resultat = JouerTour::executer(&mut etat, "j'attaque", &mut narrateur, &mut de_joueur, &mut de_monde, &mut |_| {});
-        assert!(matches!(resultat, Err(ErreurTour::AucunCombatEnCours)));
+        let resultat = JouerTour::executer(&mut etat, "j'utilise un objet", &mut narrateur, &mut de_joueur, &mut de_monde, &mut |_| {});
+        assert!(matches!(resultat, Err(ErreurTour::ObjetInvalide)));
+    }
+
+    #[test]
+    fn jouer_tour_attaquer_hors_combat_demarre_un_combat_au_lieu_d_echouer() {
+        // Régression centrale visée par ce correctif : avant, un joueur
+        // disant « j'attaque le loup » hors combat pouvait être classifié
+        // en `Attaquer { cible: "Loup" }` par le narrateur (le prompt
+        // proposait ce format même hors combat) ; `valider_action` le
+        // rejetait alors systématiquement avec `AucunCombatEnCours`, ce que
+        // l'UI affichait comme une erreur brute au joueur — son intention
+        // de déclencher un combat échouait silencieusement. `JouerTour::executer`
+        // retombe désormais sur `ProvoquerCombat` quand `Attaquer` arrive
+        // sans combat en cours : le tour doit réussir et démarrer un combat
+        // contre "Loup", pas échouer.
+        let mut etat = etat_sans_combat();
+        let mut narrateur = NarrateurDeTest { action: ActionJoueur::Attaquer { cible: "Loup".into() } };
+        let mut de_joueur = GenerateurDeSeed::nouveau(vec![]);
+        let mut de_monde = GenerateurDeSeed::nouveau(vec![10, 5]); // initiative joueur, initiative ennemi
+        let resultat = JouerTour::executer(&mut etat, "j'attaque le loup", &mut narrateur, &mut de_joueur, &mut de_monde, &mut |_| {})
+            .expect("le tour doit réussir : Attaquer hors combat doit démarrer un combat, pas échouer");
+        assert_eq!(resultat.vainqueur_combat, None);
+        let combat = etat.combat_en_cours.as_ref().expect("un combat doit avoir démarré contre le Loup");
+        assert_eq!(combat.ennemis[0].nom, "Loup");
     }
 
     #[test]

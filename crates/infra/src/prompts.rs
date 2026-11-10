@@ -22,6 +22,22 @@ pub fn construire_prompt_introduction(personnage: &Personnage, lieu: &str, premi
 
 pub fn construire_prompt_classification(contexte: &ContexteTour) -> String {
     let combat_actif = contexte.etat.combat_en_cours.as_ref().map(|c| !c.termine).unwrap_or(false);
+    // "attaquer"/"fuir"/"esquiver" ne font sens que si un combat est déjà
+    // actif (on ne peut pas fuir ou esquiver un combat qui n'existe pas, et
+    // "attaquer" vise un ennemi déjà engagé) ; "utiliser_objet" reste
+    // proposé dans tous les cas (boire une potion, par exemple, a un sens
+    // qu'on soit en combat ou non). Avant ce correctif, ces trois formats
+    // étaient proposés même hors combat, à côté de "provoquer_combat" — le
+    // modèle pouvait alors choisir "attaquer" pour une intention
+    // d'engager le combat, ce que `valider_action` rejette systématiquement
+    // hors combat.
+    let exemple_attaquer_fuir_esquiver: &str = if combat_actif {
+        "{\"action\": \"attaquer\", \"cible\": \"NomDeLEnnemi\"}\n\
+         {\"action\": \"fuir\"}\n\
+         {\"action\": \"esquiver\"}\n"
+    } else {
+        ""
+    };
     let (exemple_libre, instruction_agressif): (&str, &str) = if combat_actif {
         (
             "{\"action\": \"libre\", \"agressif\": true|false}",
@@ -57,10 +73,8 @@ pub fn construire_prompt_classification(contexte: &ContexteTour) -> String {
          sans aucun autre texte. Utilise exactement un de ces formats, \
          avec ces clés exactes (remplace seulement la valeur après les deux-points \
          pour \"cible\"/\"objet\"/\"ennemi\"/\"difficulte\") :\n\
-         {{\"action\": \"attaquer\", \"cible\": \"NomDeLEnnemi\"}}\n\
+         {}\
          {{\"action\": \"utiliser_objet\", \"objet\": \"NomDeLObjet\"}}\n\
-         {{\"action\": \"fuir\"}}\n\
-         {{\"action\": \"esquiver\"}}\n\
          {}\
          {}\n\
          {}\
@@ -69,6 +83,7 @@ pub fn construire_prompt_classification(contexte: &ContexteTour) -> String {
         description_combat(&contexte.etat),
         description_personnage(&contexte.etat),
         contexte.saisie_joueur,
+        exemple_attaquer_fuir_esquiver,
         exemple_provoquer_combat,
         exemple_libre,
         instruction_agressif,
@@ -429,17 +444,38 @@ mod tests {
     }
 
     #[test]
-    fn le_prompt_de_classification_contient_un_exemple_pour_chaque_format_d_action() {
+    fn le_prompt_de_classification_hors_combat_ne_propose_pas_attaquer_fuir_ou_esquiver() {
+        // "attaquer"/"fuir"/"esquiver" n'ont de sens que si un combat est
+        // déjà actif ; hors combat, c'est "provoquer_combat" qui doit être
+        // proposé pour une intention hostile — voir le test ci-dessous pour
+        // le cas en combat, où ces trois formats réapparaissent.
         let contexte = ContexteTour {
             etat: etat_sans_combat(),
             saisie_joueur: "J'observe".to_string(),
         };
         let prompt = construire_prompt_classification(&contexte);
-        assert!(prompt.contains(r#"{"action": "attaquer", "cible": "NomDeLEnnemi"}"#));
+        assert!(!prompt.contains(r#"{"action": "attaquer", "cible": "NomDeLEnnemi"}"#));
+        assert!(!prompt.contains(r#"{"action": "fuir"}"#));
+        assert!(!prompt.contains(r#"{"action": "esquiver"}"#));
         assert!(prompt.contains(r#"{"action": "utiliser_objet", "objet": "NomDeLObjet"}"#));
+        assert!(prompt.contains(r#"{"action": "libre"}"#));
+        assert!(prompt.contains(r#"{"action": "provoquer_combat", "ennemi": "NomDeLEnnemi", "difficulte": "faible"|"moyen"|"fort"}"#));
+    }
+
+    #[test]
+    fn le_prompt_de_classification_en_combat_propose_attaquer_fuir_et_esquiver() {
+        let contexte = ContexteTour {
+            etat: etat_en_combat(),
+            saisie_joueur: "J'attaque".to_string(),
+        };
+        let prompt = construire_prompt_classification(&contexte);
+        assert!(prompt.contains(r#"{"action": "attaquer", "cible": "NomDeLEnnemi"}"#));
         assert!(prompt.contains(r#"{"action": "fuir"}"#));
         assert!(prompt.contains(r#"{"action": "esquiver"}"#));
-        assert!(prompt.contains(r#"{"action": "libre"}"#));
+        assert!(prompt.contains(r#"{"action": "utiliser_objet", "objet": "NomDeLObjet"}"#));
+        assert!(prompt.contains(r#"{"action": "libre", "agressif": true|false}"#));
+        // "provoquer_combat" n'a pas de sens une fois un combat déjà actif.
+        assert!(!prompt.contains("provoquer_combat"));
     }
 
     #[test]
