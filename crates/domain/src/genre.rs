@@ -41,6 +41,22 @@ impl Genre {
             Genre::Steampunk => "un monde rétro-futuriste de machines à vapeur et d'inventions mécaniques",
         }
     }
+
+    /// Lieu de départ cohérent avec le genre — utilisé à la création d'une
+    /// nouvelle histoire. Avant l'ajout du genre, ce lieu était toujours
+    /// "Clairière" (un nom de fantasy médiévale) quel que soit le genre
+    /// choisi, ce qui n'avait aucun sens pour la science-fiction ou
+    /// l'horreur par exemple.
+    pub fn lieu_initial(&self) -> &'static str {
+        match self {
+            Genre::FantasyMedievale => "une clairière, à l'orée d'une forêt ancienne",
+            Genre::ScienceFiction => "un poste avancé orbital, en vue d'une planète inconnue",
+            Genre::Horreur => "un hameau brumeux, aux volets tous clos",
+            Genre::PolarNoir => "une ruelle détrempée, sous le néon d'une enseigne défaillante",
+            Genre::PostApocalyptique => "les ruines d'une station-service, le long d'une route craquelée",
+            Genre::Steampunk => "un terminal de dirigeables, entre vapeur et rouages",
+        }
+    }
 }
 
 #[cfg(test)]
@@ -48,11 +64,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn chaque_genre_a_un_nom_affiche_et_une_indication_non_vides() {
+    fn chaque_genre_a_un_nom_affiche_une_indication_et_un_lieu_non_vides() {
         for genre in Genre::TOUTES {
             assert!(!genre.nom_affiche().is_empty());
             assert!(!genre.indication_prompt().is_empty());
+            assert!(!genre.lieu_initial().is_empty());
         }
+    }
+
+    #[test]
+    fn le_lieu_initial_varie_selon_le_genre() {
+        assert_ne!(Genre::FantasyMedievale.lieu_initial(), Genre::ScienceFiction.lieu_initial());
     }
 
     #[test]

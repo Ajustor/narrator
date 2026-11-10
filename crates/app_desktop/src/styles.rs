@@ -81,7 +81,7 @@ html, body {
     margin-bottom: 0.25rem;
 }
 
-.champ input, .champ select {
+.champ input, .champ select, .champ textarea {
     width: 100%;
     background: var(--bg);
     color: var(--text);
@@ -89,12 +89,18 @@ html, body {
     border-radius: 4px;
     padding: 0.5rem;
     font-size: 1rem;
+    font-family: inherit;
     /* WebKitGTK keeps native form-control chrome (a light background on
-       <select>/<input>) unless appearance is explicitly reset — without
-       this, the background/color rules above are silently ignored on
-       these two elements specifically. */
+       <select>/<input>/<textarea>) unless appearance is explicitly reset —
+       without this, the background/color rules above are silently ignored
+       on these elements specifically. */
     -webkit-appearance: none;
     appearance: none;
+}
+
+.champ textarea {
+    resize: vertical;
+    min-height: 4.5rem;
 }
 
 .champ select {

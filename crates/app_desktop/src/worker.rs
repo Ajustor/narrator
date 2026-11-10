@@ -80,7 +80,7 @@ pub fn creer_nouvelle_histoire(
     let personnage = creer_personnage(nom, classe, valeurs)?;
     Ok(EtatPartie {
         personnage,
-        lieu_actuel: "Clairière".to_string(),
+        lieu_actuel: genre.lieu_initial().to_string(),
         // Pas de combat forcé dès la création : un combat ne démarre que
         // via `ActionJoueur::ProvoquerCombat` (action agressive du joueur,
         // ou décision du narrateur), jamais instantanément en même temps
@@ -495,6 +495,16 @@ mod tests {
         ).unwrap();
         assert_eq!(etat.premisse.genre, Genre::Horreur);
         assert_eq!(etat.premisse.description, "une vieille malédiction");
+    }
+
+    #[test]
+    fn creer_nouvelle_histoire_demarre_dans_un_lieu_coherent_avec_le_genre() {
+        let etat = creer_nouvelle_histoire(
+            "Elowen", "Guerrier", [15, 14, 13, 12, 10, 8],
+            Genre::ScienceFiction, String::new(),
+        ).unwrap();
+        assert_eq!(etat.lieu_actuel, Genre::ScienceFiction.lieu_initial());
+        assert_ne!(etat.lieu_actuel, "Clairière");
     }
 
     /// Review Focus : reprendre une histoire dont le fichier est absent ou

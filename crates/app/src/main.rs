@@ -29,16 +29,13 @@ fn main() {
         }
         Err(ErreurSauvegarde::FichierAbsent) => {
             let personnage = creation::creer_personnage_interactif(&mut de);
+            let premisse = PremisseHistoire::default();
+            let lieu_actuel = premisse.genre.lieu_initial().to_string();
             let mut fragment_sortie = |fragment: &str| {
                 print!("{fragment}");
                 io::stdout().flush().ok();
             };
-            match narrateur.raconter_introduction(
-                &personnage,
-                "Clairière",
-                &PremisseHistoire::default(),
-                &mut fragment_sortie,
-            ) {
+            match narrateur.raconter_introduction(&personnage, &lieu_actuel, &premisse, &mut fragment_sortie) {
                 Ok(_) => println!(),
                 Err(erreur) => eprintln!("\n(échec de l'introduction narrée : {erreur:?})"),
             }
@@ -47,11 +44,11 @@ fn main() {
             // agressive du joueur, ou décision du narrateur).
             EtatPartie {
                 personnage,
-                lieu_actuel: "Clairière".to_string(),
+                lieu_actuel,
                 combat_en_cours: None,
                 resumes: Vec::new(),
                 pnj_connus: Vec::new(),
-                premisse: PremisseHistoire::default(),
+                premisse,
             }
         }
         Err(ErreurSauvegarde::Lecture(message)) => {
