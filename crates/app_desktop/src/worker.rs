@@ -66,7 +66,7 @@ pub fn repertoire_modeles_par_defaut() -> PathBuf {
     repertoire_donnees_app().join("modeles")
 }
 
-/// Construit l'état initial d'une nouvelle histoire (personnage + premier
+/// Construit l'état initial d'une nouvelle histoire (personnage, sans
 /// combat), sans rien écrire sur disque ni toucher à l'index — pure,
 /// testable isolément. `lancer()` s'occupe de la génération de l'id, de
 /// l'écriture de l'index et de la sauvegarde une fois le modèle chargé.
@@ -79,16 +79,13 @@ pub fn creer_nouvelle_histoire(
     Ok(EtatPartie {
         personnage,
         lieu_actuel: "Clairière".to_string(),
-        // Plus de combat forcé dès la création : la première rencontre
-        // (le Gobelin) se déclenche désormais au premier vrai tour du
-        // joueur, via `JouerTour::executer` (voir
-        // `rencontre_initiale_declenchee`) — pas instantanément, en même
-        // temps que la scène d'ouverture, ce qui montrait le panneau de
-        // combat avant même que le joueur ait fait quoi que ce soit.
+        // Pas de combat forcé dès la création : un combat ne démarre que
+        // via `ActionJoueur::ProvoquerCombat` (action agressive du joueur,
+        // ou décision du narrateur), jamais instantanément en même temps
+        // que la scène d'ouverture.
         combat_en_cours: None,
         resumes: Vec::new(),
         pnj_connus: Vec::new(),
-        rencontre_initiale_declenchee: false,
     })
 }
 
@@ -471,12 +468,10 @@ mod tests {
     fn creer_nouvelle_histoire_construit_un_personnage_sans_combat_force() {
         let etat = creer_nouvelle_histoire("Elowen", "Guerrier", [15, 14, 13, 12, 10, 8]).unwrap();
         assert_eq!(etat.personnage.nom, "Elowen");
-        // Plus de combat forcé dès la création : la première rencontre se
-        // déclenche désormais au premier vrai tour (voir
-        // `application::usecases::jouer_tour::amorcer_rencontre_initiale`),
-        // pas instantanément en même temps que la scène d'ouverture.
+        // Pas de combat forcé dès la création : un combat ne démarre que
+        // via `ActionJoueur::ProvoquerCombat`, jamais instantanément en
+        // même temps que la scène d'ouverture.
         assert!(etat.combat_en_cours.is_none());
-        assert!(!etat.rencontre_initiale_declenchee);
     }
 
     /// Review Focus : reprendre une histoire dont le fichier est absent ou
@@ -558,7 +553,6 @@ mod tests {
             combat_en_cours: None,
             resumes: vec![],
             pnj_connus: vec![],
-            rencontre_initiale_declenchee: true,
         }
     }
 

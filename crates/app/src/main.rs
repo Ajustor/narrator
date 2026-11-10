@@ -37,16 +37,15 @@ fn main() {
                 Ok(_) => println!(),
                 Err(erreur) => eprintln!("\n(échec de l'introduction narrée : {erreur:?})"),
             }
-            // Plus de combat forcé dès la création : la première rencontre
-            // se déclenche désormais au premier vrai tour, dans
-            // `JouerTour::executer` (voir `rencontre_initiale_declenchee`).
+            // Plus de combat forcé dès la création : un combat ne démarre
+            // plus que via `ActionJoueur::ProvoquerCombat` (action
+            // agressive du joueur, ou décision du narrateur).
             EtatPartie {
                 personnage,
                 lieu_actuel: "Clairière".to_string(),
                 combat_en_cours: None,
                 resumes: Vec::new(),
                 pnj_connus: Vec::new(),
-                rencontre_initiale_declenchee: false,
             }
         }
         Err(ErreurSauvegarde::Lecture(message)) => {

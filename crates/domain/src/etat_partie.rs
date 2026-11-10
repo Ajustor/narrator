@@ -11,15 +11,6 @@ pub struct EtatPartie {
     pub resumes: Vec<String>,
     #[serde(default)]
     pub pnj_connus: Vec<FichePnj>,
-    /// `false` tant que la toute première rencontre (actuellement le
-    /// Gobelin de départ) n'a pas encore été déclenchée — voir
-    /// `application::usecases::jouer_tour::amorcer_rencontre_initiale`.
-    /// `#[serde(default)]` : une sauvegarde créée avant l'ajout de ce champ
-    /// se relit avec `false`, ce qui redéclenche la rencontre à la
-    /// prochaine action — acceptable pour une sauvegarde déjà ancienne,
-    /// bien préférable à un champ manquant qui ferait échouer la lecture.
-    #[serde(default)]
-    pub rencontre_initiale_declenchee: bool,
 }
 
 #[cfg(test)]
@@ -50,7 +41,6 @@ mod tests {
                 description: "forgeron bourru et méfiant".into(),
                 historique: vec!["Première rencontre à la forge.".into()],
             }],
-            rencontre_initiale_declenchee: true,
         }
     }
 

@@ -2,8 +2,8 @@ use crate::ports::generateur_de::GenerateurDe;
 use crate::ports::narrateur::{ContexteResultat, ContexteTour, ErreurNarrateur, Narrateur};
 use crate::usecases::commencer_combat::commencer_combat;
 use domain::{
-    evaluer_jet_attaque, gabarit_ennemi, modificateur, ActionJoueur, Acteur, De, EffetObjet, Ennemi, EtatPartie,
-    FichePnj, JetDe, Vainqueur, BONUS_MAITRISE,
+    evaluer_jet_attaque, gabarit_ennemi, modificateur, ActionJoueur, Acteur, De, EffetObjet, EtatPartie, FichePnj,
+    JetDe, Vainqueur, BONUS_MAITRISE,
 };
 
 // SEUIL_MOTS_RESUMES est choisi pour rester largement sous TAILLE_CONTEXTE
@@ -311,32 +311,6 @@ fn combat_actif_et_conclu(etat: &EtatPartie) -> bool {
     etat.combat_en_cours.as_ref().map(|c| c.termine).unwrap_or(false)
 }
 
-/// Déclenche la toute première rencontre d'une histoire (le Gobelin de la
-/// clairière) si elle ne l'a pas encore été — appelé en tout début de
-/// `JouerTour::executer`, avant même de classifier l'action du joueur.
-///
-/// Sans ça, le combat devrait être lancé par l'appelant dès la création du
-/// personnage (comportement précédent) : le panneau de combat apparaissait
-/// alors instantanément, avant même que le joueur ait fait quoi que ce
-/// soit, en même temps que la scène d'ouverture. En le déclenchant ici à
-/// la place, au tout premier tour réel, le joueur voit d'abord
-/// l'exploration pure (l'intro) puis entre en combat seulement quand il
-/// agit — et comme `etat` (donc `combat_en_cours`) est mis à jour avant de
-/// construire le `ContexteTour` de classification, le narrateur voit déjà
-/// le Gobelin et peut correctement classifier un premier message du type
-/// "j'attaque" en `Attaquer`, sans quoi `valider_action` le rejetterait
-/// (pas de combat en cours à ce moment-là).
-fn amorcer_rencontre_initiale(etat: &mut EtatPartie, de_monde: &mut dyn GenerateurDe, resume: &mut Vec<String>) {
-    if etat.rencontre_initiale_declenchee {
-        return;
-    }
-    let gobelin = Ennemi::nouveau("Gobelin".to_string(), 7, De { faces: 6 }, 12, 2, 3);
-    let combat = commencer_combat(&etat.personnage, vec![gobelin], de_monde);
-    etat.combat_en_cours = Some(combat);
-    etat.rencontre_initiale_declenchee = true;
-    resume.push("⚔️ Un Gobelin surgit et t'attaque !".to_string());
-}
-
 fn terminer_si_ennemis_morts(etat: &mut EtatPartie) {
     if let Some(combat) = etat.combat_en_cours.as_mut() {
         if combat.tous_ennemis_morts() {
@@ -426,11 +400,11 @@ pub struct JouerTour;
 impl JouerTour {
     /// `de_joueur` lance uniquement les dés qui appartiennent au joueur
     /// (son jet d'attaque, son jet de dégâts) ; `de_monde` lance tout le
-    /// reste (initiative des deux camps, jets des ennemis, et la
-    /// rencontre initiale). Les séparer permet à l'appelant de brancher
-    /// `de_joueur` sur un générateur qui attend une action du joueur (ex.
-    /// un dé virtuel à l'écran dans `app_desktop`) sans jamais faire
-    /// attendre le joueur pour un jet qui n'est pas le sien.
+    /// reste (initiative des deux camps et jets des ennemis). Les séparer
+    /// permet à l'appelant de brancher `de_joueur` sur un générateur qui
+    /// attend une action du joueur (ex. un dé virtuel à l'écran dans
+    /// `app_desktop`) sans jamais faire attendre le joueur pour un jet qui
+    /// n'est pas le sien.
     pub fn executer(
         etat: &mut EtatPartie,
         saisie: &str,
@@ -440,7 +414,6 @@ impl JouerTour {
         sur_fragment: &mut dyn FnMut(&str),
     ) -> Result<ResultatTour, ErreurTour> {
         let mut resume = Vec::new();
-        amorcer_rencontre_initiale(etat, de_monde, &mut resume);
 
         let contexte_tour = ContexteTour {
             etat: etat.clone(),
@@ -544,7 +517,6 @@ mod tests {
             combat_en_cours: None,
             resumes: vec![],
             pnj_connus: vec![],
-            rencontre_initiale_declenchee: true,
         }
     }
 
@@ -1053,43 +1025,16 @@ mod tests {
     }
 
     #[test]
-    fn jouer_tour_declenche_la_rencontre_initiale_au_tout_premier_tour() {
+    fn un_premier_tour_non_agressif_ne_demarre_aucun_combat() {
         let mut etat = etat_sans_combat();
-        etat.rencontre_initiale_declenchee = false;
-        let mut narrateur = NarrateurDeTest { action: ActionJoueur::ActionLibre { texte: "j'observe".into(), agressif: false } };
-        // de_joueur : action libre non-agressive en combat => aucun jet.
+        let mut narrateur = NarrateurDeTest {
+            action: ActionJoueur::ActionLibre { texte: "j'observe les environs".into(), agressif: false },
+        };
         let mut de_joueur = GenerateurDeSeed::nouveau(vec![]);
-        // de_monde : initiative joueur (10), initiative gobelin (5) pour
-        // `amorcer_rencontre_initiale`, puis attaque (1, échec critique
-        // automatique, pas de jet de dégâts) du gobelin qui agit ensuite
-        // (le joueur, plus rapide, agit en premier).
-        let mut de_monde = GenerateurDeSeed::nouveau(vec![10, 5, 1]);
-        let resultat =
-            JouerTour::executer(&mut etat, "j'observe", &mut narrateur, &mut de_joueur, &mut de_monde, &mut |_| {})
-                .unwrap();
-
-        assert!(etat.combat_en_cours.is_some(), "la rencontre doit démarrer dès le premier tour");
-        assert!(etat.rencontre_initiale_declenchee);
-        assert!(resultat.resume_mecanique.iter().any(|l| l.contains("Gobelin")));
-    }
-
-    #[test]
-    fn jouer_tour_ne_redeclenche_pas_la_rencontre_si_deja_amorcee() {
-        let mut etat = etat_en_combat(); // rencontre_initiale_declenchee: true (fixture)
-        let pv_gobelin_avant = etat.combat_en_cours.as_ref().unwrap().ennemis[0].pv_actuels;
-        let mut narrateur = NarrateurDeTest { action: ActionJoueur::ActionLibre { texte: "j'observe".into(), agressif: false } };
-        // Action libre non-agressive en combat => aucun jet, donc aucune
-        // incidence sur les PV du gobelin, seule chose vérifiée par ce test.
-        let mut de_joueur = GenerateurDeSeed::nouveau(vec![]);
-        // Puis le gobelin agit (joueur plus rapide par défaut) : d20=1 =>
-        // échec critique automatique, pas de jet de dégâts. Si la
-        // rencontre se redéclenchait, `commencer_combat` consommerait deux
-        // dés d'initiative supplémentaires ici, qu'il n'y a pas — un
-        // déclenchement en trop ferait paniquer `GenerateurDeSeed`.
-        let mut de_monde = GenerateurDeSeed::nouveau(vec![1]);
-        JouerTour::executer(&mut etat, "j'observe", &mut narrateur, &mut de_joueur, &mut de_monde, &mut |_| {}).unwrap();
-
-        assert_eq!(etat.combat_en_cours.as_ref().unwrap().ennemis[0].pv_actuels, pv_gobelin_avant);
+        let mut de_monde = GenerateurDeSeed::nouveau(vec![]);
+        JouerTour::executer(&mut etat, "j'observe les environs", &mut narrateur, &mut de_joueur, &mut de_monde, &mut |_| {})
+            .unwrap();
+        assert!(etat.combat_en_cours.is_none());
     }
 
     use std::cell::RefCell;
