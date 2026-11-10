@@ -40,3 +40,18 @@ icon = ["assets/icon.png"]
 
 [android]
 icon = ["assets/icon.png"]
+
+# Mise à jour Android (`mise_a_jour::lancer_installation`). Ces deux
+# déclarations sont CONFIRMÉES EMPIRIQUEMENT comme appliquées par `dx`
+# 0.7.9 (permission présente dans le AndroidManifest.xml généré, fichier
+# .pro copié dans le module Gradle `app/`, que `build.gradle.kts` inclut via
+# `fileTree(".") { include("**/*.pro") }`). Le `<provider>` FileProvider et
+# `res/xml/file_paths.xml`, eux, ne peuvent PAS être déclarés ici :
+# `[android.raw] application` est silencieusement ignoré par le gabarit de
+# manifeste de `dx` 0.7.9, et aucun champ n'ajoute de ressource `res/` —
+# c'est `scripts/patch_manifest_maj_android.sh` qui les pose après chaque
+# `dx build`/`dx bundle` (même contrat que `scripts/patch_icone_android.sh`).
+proguard_rules = ["android/proguard-maj.pro"]
+
+[android.permissions]
+"android.permission.REQUEST_INSTALL_PACKAGES" = { description = "Installer les mises à jour de l'application" }
