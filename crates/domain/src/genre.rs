@@ -1,6 +1,7 @@
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Genre {
+    #[default]
     FantasyMedievale,
     ScienceFiction,
     Horreur,
@@ -39,12 +40,6 @@ impl Genre {
             Genre::PostApocalyptique => "un monde ravagé où la civilisation s'est effondrée et où les ressources sont rares",
             Genre::Steampunk => "un monde rétro-futuriste de machines à vapeur et d'inventions mécaniques",
         }
-    }
-}
-
-impl Default for Genre {
-    fn default() -> Self {
-        Genre::FantasyMedievale
     }
 }
 

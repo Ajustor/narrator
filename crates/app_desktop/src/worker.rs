@@ -407,8 +407,9 @@ pub fn lancer(
         let _ = tx.unbounded_send(MessageVersUi::PartieCreee(etat_initial.clone()));
 
         // Nouvelle histoire seulement : une scène d'ouverture plante le
-        // décor avant le premier combat, plutôt que de lâcher le joueur
-        // directement dans l'affrontement sans aucun contexte narratif.
+        // décor au tout début de l'aventure, avant même que le joueur sache
+        // si un combat suivra (le déclenchement d'un combat est désormais
+        // dynamique et n'est plus garanti juste après l'ouverture).
         // Un échec ici n'est pas fatal — on continue sans introduction
         // plutôt que de bloquer le début de la partie pour ça.
         if !deja_enregistree {
