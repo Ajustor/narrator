@@ -418,12 +418,25 @@ pub fn lancer(
 
         if premier_passage {
             premier_passage = false;
-            if let Some(info) = verifier_mise_a_jour_au_demarrage() {
-                let _ = tx.unbounded_send(MessageVersUi::MiseAJourDisponible {
-                    version: info.version,
-                    url_apk: info.url_apk,
-                });
-            }
+            // Sur son propre thread, pas sur celui-ci : `verifier_disponibilite`
+            // peut attendre jusqu'à `DELAI_RESEAU` (3s) avant d'échouer si le
+            // serveur LAN est injoignable (téléphone hors du réseau,
+            // machine de dev éteinte) — un appel synchrone ici retarderait
+            // d'autant la boucle de réception ci-dessous (`rx.recv()`), donc
+            // la réactivité de tout l'écran de sélection, ce qui contredit
+            // le "fire-and-forget" visé. `tx` est cloné (UnboundedSender est
+            // `Clone` et `Send` tant que `MessageVersUi` l'est, ce qui est le
+            // cas ici) pour que ce thread éphémère puisse signaler son
+            // résultat indépendamment de la boucle principale du worker.
+            let tx_verification = tx.clone();
+            std::thread::spawn(move || {
+                if let Some(info) = verifier_mise_a_jour_au_demarrage() {
+                    let _ = tx_verification.unbounded_send(MessageVersUi::MiseAJourDisponible {
+                        version: info.version,
+                        url_apk: info.url_apk,
+                    });
+                }
+            });
         }
 
         let (id, info, etat_initial, deja_enregistree) = loop {

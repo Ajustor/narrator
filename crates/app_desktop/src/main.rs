@@ -154,13 +154,22 @@ fn App() -> Element {
     // `true` dès que l'utilisateur a explicitement ignoré la bannière
     // (`sur_ignorer`) — tant que c'est le cas, les ticks de progression et
     // le résultat (succès ou échec) du téléchargement EN COURS ne doivent
-    // plus la réafficher : sans ce garde-fou, `ProgressionTelechargement`/
+    // plus la réafficher : sans ce garde-fou, `ProgressionMiseAJour`/
     // `MiseAJourEchouee` (envoyés par le worker indépendamment de l'état
     // affiché côté UI) ré-écrasent `Masquee` dès le prochain pourcentage,
     // annulant silencieusement l'ignorance. Remis à `false` seulement par
     // une VRAIE nouvelle annonce (`MiseAJourDisponible`) — pas par ce même
     // téléchargement en cours.
     let mut banniere_ignoree = use_signal(|| false);
+    // Garde anti-double-tap pour « Installer » : `EtatBanniereMaj` ne gagne
+    // aucun état « installation en cours » (un succès ne renvoie rien côté
+    // worker, voir `worker::gerer_installer_mise_a_jour` — la main passe à
+    // l'installeur système), donc la bannière reste visiblement sur
+    // `PreteAInstaller` après le premier tap, ce qui laisserait un second
+    // tap renvoyer `InstallerMiseAJour` une deuxième fois. Remis à `false`
+    // par un VRAI nouvel état (`MiseAJourDisponible` ou `MiseAJourEchouee`,
+    // qui permet de retenter) — jamais par `PreteAInstaller` lui-même.
+    let mut installation_demandee = use_signal(|| false);
 
     use_future(move || {
         let rx_partage = rx_partage.clone();
@@ -278,8 +287,11 @@ fn App() -> Element {
                 MessageVersUi::MiseAJourDisponible { version, url_apk } => {
                     // Une VRAIE nouvelle annonce : l'ignorance d'une
                     // précédente bannière (s'il y en avait une) ne tient
-                    // plus face à une mise à jour différente.
+                    // plus face à une mise à jour différente, et un éventuel
+                    // tap « Installer » d'un cycle précédent ne doit plus
+                    // bloquer ce nouveau cycle.
                     banniere_ignoree.set(false);
+                    installation_demandee.set(false);
                     banniere_maj.set(EtatBanniereMaj::Disponible { version, url_apk });
                 }
                 MessageVersUi::ProgressionMiseAJour(progression) => {
@@ -293,6 +305,11 @@ fn App() -> Element {
                     }
                 }
                 MessageVersUi::MiseAJourEchouee(message) => {
+                    // Un échec (téléchargement ou installation) doit
+                    // permettre de retenter : un tap « Installer » bloqué
+                    // par `installation_demandee` ne doit pas le rester
+                    // pour toujours si l'installation a échoué.
+                    installation_demandee.set(false);
                     if !banniere_ignoree() {
                         banniere_maj.set(EtatBanniereMaj::Echouee(message));
                     }
@@ -386,11 +403,30 @@ fn App() -> Element {
             etat: banniere_maj(),
             sur_telecharger: move |_| {
                 if let EtatBanniereMaj::Disponible { url_apk, .. } = banniere_maj() {
+                    // Affiche la progression (à 0%) immédiatement, avant
+                    // même la première réponse du worker : celui-ci peut
+                    // être occupé (narration en cours, chargement du
+                    // modèle) et mettre un moment avant d'émettre son
+                    // premier `ProgressionMiseAJour`. Sans ce retour
+                    // immédiat, la bannière reste sur `Disponible` assez
+                    // longtemps pour qu'un second tap renvoie une deuxième
+                    // fois `TelechargerMiseAJour` ; une fois l'état changé
+                    // ici, ce `if let` échoue sur un second tap et l'ignore.
+                    banniere_maj.set(EtatBanniereMaj::EnTelechargement { progression: 0.0 });
                     let _ = tx_telecharger.send(MessageVersWorker::TelechargerMiseAJour { url_apk });
                 }
             },
             sur_installer: move |_| {
+                // `EtatBanniereMaj` ne distingue pas « prête à installer »
+                // de « installation déjà demandée » (un succès ne renvoie
+                // rien côté worker, voir `installation_demandee` plus haut),
+                // d'où ce garde-fou explicite plutôt qu'un simple `if let`
+                // sur l'état de la bannière.
+                if installation_demandee() {
+                    return;
+                }
                 if let EtatBanniereMaj::PreteAInstaller { chemin_apk } = banniere_maj() {
+                    installation_demandee.set(true);
                     let _ = tx_installer.send(MessageVersWorker::InstallerMiseAJour { chemin_apk });
                 }
             },

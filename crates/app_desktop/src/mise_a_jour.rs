@@ -86,9 +86,13 @@ impl std::fmt::Display for ErreurInstallation {
     }
 }
 
-/// Autorité du `FileProvider` déclaré dans `Dioxus.toml` : le manifeste
-/// utilise `${applicationId}.fileprovider`, on reconstruit donc la même
-/// valeur à l'exécution à partir de `Context.getPackageName()` (égal à
+/// Autorité du `FileProvider` déclaré par
+/// `scripts/patch_manifest_maj_android.sh` dans le manifeste Android généré
+/// (`Dioxus.toml` ne porte que la permission `REQUEST_INSTALL_PACKAGES` et
+/// la règle proguard associées, voir ce script — `dx` 0.7.9 n'offre aucun
+/// moyen déclaratif d'ajouter un `<provider>`) : le manifeste utilise
+/// `${applicationId}.fileprovider`, on reconstruit donc la même valeur à
+/// l'exécution à partir de `Context.getPackageName()` (égal à
 /// l'`applicationId`) plutôt que de dupliquer l'identifiant en dur ici.
 #[cfg(feature = "plateforme-android")]
 const SUFFIXE_AUTORITE_FILE_PROVIDER: &str = ".fileprovider";
