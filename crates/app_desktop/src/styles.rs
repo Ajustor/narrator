@@ -258,6 +258,15 @@ html, body {
     font-style: italic;
 }
 
+/* Geste/action entre astérisques (*ainsi*, voir la convention expliquée au
+   modèle dans infra::prompts), côté joueur comme côté narrateur (gestes
+   d'un PNJ) — grisé pour se distinguer visuellement de la parole/narration
+   ordinaire. `--text-dim` reste plus sombre que le `--text` de la bulle
+   qui l'entoure, aussi bien sur le fond du récit que sur celui du joueur. */
+.action-texte {
+    color: var(--text-dim);
+}
+
 .indicateur-attente {
     color: var(--text-dim);
     font-style: italic;

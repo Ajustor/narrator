@@ -3,6 +3,36 @@ use domain::{EtatPartie, LigneTranscript};
 
 use crate::protocole::{AffichageLigneTranscript, MessageVersWorker};
 
+/// Un morceau de texte à afficher, et si c'est une action entre astérisques
+/// (`*ainsi*` — voir la convention expliquée au modèle dans
+/// `infra::prompts`) plutôt que de la parole ou de la narration ordinaire.
+/// Ces actions sont décrites aussi bien par le joueur (dans sa saisie) que
+/// par le narrateur (gestes d'un PNJ) : la distinction visuelle s'applique
+/// donc aux deux côtés du journal.
+struct SegmentTexte {
+    texte: String,
+    est_action: bool,
+}
+
+/// Découpe `texte` en alternant texte ordinaire et actions entre
+/// astérisques, astérisques comprises (pour que l'action reste visuellement
+/// délimitée même une fois grisée). Si le nombre d'astérisques est impair
+/// (astérisque de fermeture oubliée par le modèle ou le joueur), le reste
+/// du texte après la dernière astérisque est traité comme une action —
+/// imperfection acceptée plutôt qu'une détection plus complexe pour un cas
+/// rare et purement cosmétique.
+fn decouper_actions(texte: &str) -> Vec<SegmentTexte> {
+    texte
+        .split('*')
+        .enumerate()
+        .filter(|(_, partie)| !partie.is_empty())
+        .map(|(i, partie)| {
+            let est_action = i % 2 == 1;
+            SegmentTexte { texte: if est_action { format!("*{partie}*") } else { partie.to_string() }, est_action }
+        })
+        .collect()
+}
+
 #[component]
 pub fn Jeu(
     etat: EtatPartie,
@@ -80,10 +110,24 @@ pub fn Jeu(
 
                 div { id: "journal", class: "journal",
                     for ligne in journal.iter() {
-                        p { class: "{ligne.classe()}", "{ligne.texte()}" }
+                        p { class: "{ligne.classe()}",
+                            for segment in decouper_actions(ligne.texte()) {
+                                span {
+                                    class: if segment.est_action { "action-texte" } else { "" },
+                                    "{segment.texte}"
+                                }
+                            }
+                        }
                     }
                     if !narration_en_cours.is_empty() {
-                        p { class: "narration-en-cours", "{narration_en_cours}" }
+                        p { class: "narration-en-cours",
+                            for segment in decouper_actions(&narration_en_cours) {
+                                span {
+                                    class: if segment.est_action { "action-texte" } else { "" },
+                                    "{segment.texte}"
+                                }
+                            }
+                        }
                     } else if tour_en_cours {
                         p { class: "narration-en-cours indicateur-attente", "Le narrateur réfléchit…" }
                     }
@@ -137,5 +181,56 @@ pub fn Jeu(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn textes(segments: &[SegmentTexte]) -> Vec<&str> {
+        segments.iter().map(|s| s.texte.as_str()).collect()
+    }
+
+    fn actions(segments: &[SegmentTexte]) -> Vec<bool> {
+        segments.iter().map(|s| s.est_action).collect()
+    }
+
+    #[test]
+    fn decoupe_une_action_au_milieu_d_un_texte() {
+        let segments = decouper_actions("Il dégaine son épée et *recule prudemment* vers la porte.");
+        assert_eq!(textes(&segments), vec!["Il dégaine son épée et ", "*recule prudemment*", " vers la porte."]);
+        assert_eq!(actions(&segments), vec![false, true, false]);
+    }
+
+    #[test]
+    fn decoupe_un_texte_sans_action_en_un_seul_segment() {
+        let segments = decouper_actions("Il observe les environs.");
+        assert_eq!(textes(&segments), vec!["Il observe les environs."]);
+        assert_eq!(actions(&segments), vec![false]);
+    }
+
+    #[test]
+    fn decoupe_une_action_au_tout_debut_ou_a_la_toute_fin() {
+        let segments = decouper_actions("*hausse les épaules* d'un air las");
+        assert_eq!(textes(&segments), vec!["*hausse les épaules*", " d'un air las"]);
+        assert_eq!(actions(&segments), vec![true, false]);
+    }
+
+    #[test]
+    fn decoupe_plusieurs_actions_separees() {
+        let segments = decouper_actions("*se penche* Qui va là ? *recule*");
+        assert_eq!(textes(&segments), vec!["*se penche*", " Qui va là ? ", "*recule*"]);
+        assert_eq!(actions(&segments), vec![true, false, true]);
+    }
+
+    #[test]
+    fn traite_une_astersique_non_fermee_comme_une_action_jusqu_a_la_fin() {
+        // Imperfection connue et acceptée : sans astérisque de fermeture, on
+        // ne peut pas distinguer ce cas d'une action qui continue — mieux
+        // vaut griser trop que planter ou perdre du texte.
+        let segments = decouper_actions("Il recule *lentement vers le mur");
+        assert_eq!(textes(&segments), vec!["Il recule ", "*lentement vers le mur*"]);
+        assert_eq!(actions(&segments), vec![false, true]);
     }
 }
