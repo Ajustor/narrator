@@ -56,6 +56,7 @@ mod tests {
             combat_en_cours: None,
             resumes: vec![],
             pnj_connus: vec![],
+            transcript: vec![],
         }
     }
 

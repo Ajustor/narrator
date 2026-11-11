@@ -207,6 +207,7 @@ pub fn creer_nouvelle_histoire(
         // ici, pour rester le seul endroit qui décide de la longueur
         // affichée au modèle.
         premisse: domain::PremisseHistoire { genre, description: premisse_libre },
+        transcript: Vec::new(),
     })
 }
 
@@ -838,6 +839,7 @@ mod tests {
             resumes: vec![],
             pnj_connus: vec![],
             premisse: Default::default(),
+            transcript: vec![],
         }
     }
 

@@ -1,33 +1,29 @@
-use domain::{EtatPartie, Genre, Vainqueur};
+use domain::{EtatPartie, Genre, LigneTranscript, Vainqueur};
 
 pub use crate::histoires::InfoHistoire;
 pub use crate::modeles::PaletteModele;
 
-/// Une ligne du journal affiché dans `Vue::Jeu` (voir `vues::jeu::Jeu`) —
-/// distingue ce que raconte le narrateur/le système de ce que le joueur a
-/// lui-même écrit, pour un affichage façon chat (bulles alignées à gauche
-/// ou à droite selon l'auteur). Seules les lignes ajoutées PENDANT la
-/// session en cours portent cette distinction : `EtatPartie::resumes`
-/// (relu depuis la sauvegarde à la reprise d'une histoire) ne contient que
-/// la narration — les anciens messages du joueur n'y ont jamais été
-/// enregistrés et redeviennent donc `Recit` au rechargement.
-#[derive(Debug, Clone, PartialEq)]
-pub enum LigneJournal {
-    Recit(String),
-    Joueur(String),
+/// Habille `LigneTranscript` (type `domain`, persisté dans
+/// `EtatPartie::transcript`) pour son affichage dans `Vue::Jeu` — un trait
+/// local plutôt qu'un impl direct, puisque `LigneTranscript` est défini
+/// dans un autre crate. Affichage façon chat : bulle à gauche pour le
+/// narrateur, à droite pour le joueur.
+pub trait AffichageLigneTranscript {
+    fn texte(&self) -> &str;
+    fn classe(&self) -> &'static str;
 }
 
-impl LigneJournal {
-    pub fn texte(&self) -> &str {
+impl AffichageLigneTranscript for LigneTranscript {
+    fn texte(&self) -> &str {
         match self {
-            LigneJournal::Recit(texte) | LigneJournal::Joueur(texte) => texte,
+            LigneTranscript::Joueur(texte) | LigneTranscript::Narrateur(texte) => texte,
         }
     }
 
-    pub fn classe(&self) -> &'static str {
+    fn classe(&self) -> &'static str {
         match self {
-            LigneJournal::Recit(_) => "ligne-recit",
-            LigneJournal::Joueur(_) => "ligne-joueur",
+            LigneTranscript::Narrateur(_) => "ligne-recit",
+            LigneTranscript::Joueur(_) => "ligne-joueur",
         }
     }
 }

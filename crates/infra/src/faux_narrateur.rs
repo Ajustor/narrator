@@ -117,6 +117,7 @@ mod tests {
                 resumes: vec![],
                 pnj_connus: vec![],
                 premisse: Default::default(),
+                transcript: vec![],
             },
             saisie_joueur: saisie.to_string(),
         }

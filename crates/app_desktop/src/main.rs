@@ -20,9 +20,9 @@ mod vues;
 mod worker;
 
 use dioxus::prelude::*;
-use domain::Vainqueur;
+use domain::{LigneTranscript, Vainqueur};
 use futures_util::StreamExt;
-use protocole::{EtatBanniereMaj, LigneJournal, MessageVersUi, MessageVersWorker, Vue};
+use protocole::{EtatBanniereMaj, MessageVersUi, MessageVersWorker, Vue};
 use vues::banniere_maj::BanniereMiseAJour;
 use vues::confirmation_telechargement::ConfirmationTelechargement;
 use vues::creation::Creation;
@@ -122,7 +122,7 @@ fn App() -> Element {
     });
     let mut vue = use_signal(|| Vue::SelectionHistoire(Vec::new()));
     let mut etat = use_signal(|| None::<domain::EtatPartie>);
-    let mut journal: Signal<Vec<LigneJournal>> = use_signal(Vec::new);
+    let mut journal: Signal<Vec<LigneTranscript>> = use_signal(Vec::new);
     let mut narration_en_cours = use_signal(String::new);
     let mut tour_en_cours = use_signal(|| false);
     // Erreur de téléchargement/chargement survenue avant `Vue::Jeu`
@@ -198,15 +198,17 @@ fn App() -> Element {
                     // précédente encore affiché au-dessus de son propre
                     // contenu.
                     //
-                    // Pour une histoire REPRISE, `e.resumes` contient déjà
-                    // la narration des tours précédents (en clair pour les
-                    // plus récents, condensée pour les plus anciens — voir
-                    // `condenser_si_necessaire` dans `application`) : on
+                    // Pour une histoire REPRISE, `e.transcript` contient déjà
+                    // la conversation des tours précédents — DES DEUX CÔTÉS
+                    // (ce que le joueur a écrit, voir `LigneTranscript`, pas
+                    // seulement la narration qui en a résulté) : on
                     // l'utilise pour réamorcer le journal plutôt que de
                     // partir d'un écran vide sans aucun historique. Pour une
-                    // NOUVELLE histoire, `resumes` est vide, donc ce reste
-                    // équivalent à l'ancien `Vec::new()`.
-                    journal.set(e.resumes.iter().cloned().map(LigneJournal::Recit).collect());
+                    // NOUVELLE histoire, `transcript` est vide, donc ce reste
+                    // équivalent à l'ancien `Vec::new()`. (`e.resumes` seul
+                    // ne conviendrait pas ici : il ne garde que la narration,
+                    // jamais ce que le joueur a dit — voir `LigneTranscript`.)
+                    journal.set(e.transcript.clone());
                     narration_en_cours.set(String::new());
                     tour_en_cours.set(false);
                     etat.set(Some(e));
@@ -218,7 +220,7 @@ fn App() -> Element {
                 }
                 MessageVersUi::IntroductionRacontee(texte) => {
                     if !texte.is_empty() {
-                        journal.write().push(LigneJournal::Recit(texte));
+                        journal.write().push(LigneTranscript::Narrateur(texte));
                     }
                     narration_en_cours.set(String::new());
                     faire_defiler_journal();
@@ -226,9 +228,9 @@ fn App() -> Element {
                 MessageVersUi::TourTermine { etat: nouvel_etat, resultat_narration, resume_mecanique, vainqueur_combat, partie_terminee } => {
                     de_en_attente.set(None);
                     dernier_resultat_de.set(None);
-                    journal.write().push(LigneJournal::Recit(resultat_narration));
+                    journal.write().push(LigneTranscript::Narrateur(resultat_narration));
                     for ligne in resume_mecanique {
-                        journal.write().push(LigneJournal::Recit(ligne));
+                        journal.write().push(LigneTranscript::Narrateur(ligne));
                     }
                     // Une victoire ou une fuite réussie ne termine plus la
                     // partie (seule la mort le fait, voir `partie_terminee`
@@ -237,8 +239,8 @@ fn App() -> Element {
                     // pas silencieux.
                     if !partie_terminee {
                         match vainqueur_combat {
-                            Some(Vainqueur::Joueur) => journal.write().push(LigneJournal::Recit("Victoire ! Le gobelin est vaincu.".to_string())),
-                            Some(Vainqueur::Fuite) => journal.write().push(LigneJournal::Recit("Tu as fui le combat.".to_string())),
+                            Some(Vainqueur::Joueur) => journal.write().push(LigneTranscript::Narrateur("Victoire ! Le gobelin est vaincu.".to_string())),
+                            Some(Vainqueur::Fuite) => journal.write().push(LigneTranscript::Narrateur("Tu as fui le combat.".to_string())),
                             Some(Vainqueur::Ennemis) | None => {}
                         }
                     }
@@ -261,7 +263,7 @@ fn App() -> Element {
                     if matches!(vue(), Vue::Jeu) {
                         de_en_attente.set(None);
                         dernier_resultat_de.set(None);
-                        journal.write().push(LigneJournal::Recit(format!("⚠ {}", message)));
+                        journal.write().push(LigneTranscript::Narrateur(format!("⚠ {}", message)));
                         narration_en_cours.set(String::new());
                         tour_en_cours.set(false);
                         faire_defiler_journal();
@@ -368,14 +370,14 @@ fn App() -> Element {
                     de_en_attente: de_en_attente(),
                     dernier_resultat_de: dernier_resultat_de(),
                     sur_action: move |msg: MessageVersWorker| {
-                        // `JouerTour` est le seul message de cette vue qui
-                        // porte du texte écrit par le joueur — on l'ajoute
-                        // au journal ici, côté UI, avant de transmettre au
-                        // worker : `EtatPartie`/`resumes` ne conservent que
-                        // la narration (voir `LigneJournal`), donc c'est le
-                        // seul endroit où ce texte existe encore.
+                        // Affiché tout de suite, sans attendre la réponse du
+                        // worker (qui ajoutera la même ligne à
+                        // `EtatPartie::transcript`, voir `JouerTour::executer`
+                        // dans `application`) : le joueur voit son message
+                        // apparaître immédiatement plutôt qu'après le tour
+                        // entier (jet de dé, narration...).
                         if let MessageVersWorker::JouerTour(texte) = &msg {
-                            journal.write().push(LigneJournal::Joueur(texte.clone()));
+                            journal.write().push(LigneTranscript::Joueur(texte.clone()));
                         }
                         tour_en_cours.set(true);
                         narration_en_cours.set(String::new());

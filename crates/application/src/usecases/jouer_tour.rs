@@ -3,7 +3,7 @@ use crate::ports::narrateur::{ContexteResultat, ContexteTour, ErreurNarrateur, N
 use crate::usecases::commencer_combat::commencer_combat;
 use domain::{
     evaluer_jet_attaque, gabarit_ennemi, modificateur, ActionJoueur, Acteur, De, Difficulte, EffetObjet, EtatPartie,
-    FichePnj, JetDe, Vainqueur, BONUS_MAITRISE,
+    FichePnj, JetDe, LigneTranscript, Vainqueur, BONUS_MAITRISE,
 };
 
 // SEUIL_MOTS_RESUMES est choisi pour rester largement sous TAILLE_CONTEXTE
@@ -442,6 +442,12 @@ impl JouerTour {
         de_monde: &mut dyn GenerateurDe,
         sur_fragment: &mut dyn FnMut(&str),
     ) -> Result<ResultatTour, ErreurTour> {
+        // Enregistrée avant toute validation, pour que la ligne du joueur
+        // reste dans la transcript même si le tour échoue ensuite (action
+        // invalide, erreur du narrateur) — elle a bien été dite, qu'elle
+        // ait eu un effet mécanique ou non.
+        etat.transcript.push(LigneTranscript::Joueur(saisie.to_string()));
+
         let mut resume = Vec::new();
 
         let contexte_tour = ContexteTour {
@@ -525,6 +531,7 @@ impl JouerTour {
             .map_err(message_echec_narrateur)?;
 
         etat.resumes.push(narration.clone());
+        etat.transcript.push(LigneTranscript::Narrateur(narration.clone()));
         condenser_si_necessaire(etat, narrateur);
         enregistrer_pnj_si_pertinent(etat, &narration, narrateur);
 
@@ -564,6 +571,7 @@ mod tests {
             resumes: vec![],
             pnj_connus: vec![],
             premisse: Default::default(),
+            transcript: vec![],
         }
     }
 
@@ -1272,6 +1280,49 @@ mod tests {
         let mut de_monde = GenerateurDeSeed::nouveau(vec![]);
         JouerTour::executer(&mut etat, "j'observe", &mut narrateur, &mut de_joueur, &mut de_monde, &mut |_| {}).unwrap();
         assert_eq!(etat.resumes, vec!["narration de test".to_string()]);
+    }
+
+    #[test]
+    fn jouer_tour_ajoute_la_saisie_puis_la_narration_a_la_transcript() {
+        // Review Focus : reprendre une histoire sauvegardée doit pouvoir
+        // réafficher la conversation complète (les deux côtés), pas
+        // seulement ce que `resumes` garde pour la mémoire du modèle.
+        let mut etat = etat_sans_combat();
+        let mut narrateur = NarrateurDeTest { action: ActionJoueur::ActionLibre { texte: "j'observe".into(), agressif: false } };
+        let mut de_joueur = GenerateurDeSeed::nouveau(vec![]);
+        let mut de_monde = GenerateurDeSeed::nouveau(vec![]);
+        JouerTour::executer(&mut etat, "j'observe", &mut narrateur, &mut de_joueur, &mut de_monde, &mut |_| {}).unwrap();
+        assert_eq!(
+            etat.transcript,
+            vec![
+                LigneTranscript::Joueur("j'observe".to_string()),
+                LigneTranscript::Narrateur("narration de test".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn jouer_tour_garde_la_saisie_dans_la_transcript_meme_si_le_tour_echoue() {
+        // La saisie du joueur a bien été dite, qu'elle ait eu un effet
+        // mécanique ou non — voir `jouer_tour_rejette_une_action_invalide_sans_consommer_de_de`
+        // pour le cas d'échec exercé ici (cible inexistante hors combat).
+        let mut etat = etat_sans_combat();
+        let mut narrateur = NarrateurDeTest { action: ActionJoueur::Attaquer { cible: "Fantôme".into() } };
+        etat.combat_en_cours = Some(Combat {
+            ennemis: vec![Ennemi::nouveau("Gobelin".into(), 7, De { faces: 6 }, 12, 2, 3)],
+            initiative_joueur: 10,
+            initiatives_ennemis: vec![0],
+            joueur_esquive: false,
+            tour_actuel: 0,
+            termine: false,
+            vainqueur: None,
+        });
+        let mut de_joueur = GenerateurDeSeed::nouveau(vec![]);
+        let mut de_monde = GenerateurDeSeed::nouveau(vec![]);
+        let resultat =
+            JouerTour::executer(&mut etat, "j'attaque le fantôme", &mut narrateur, &mut de_joueur, &mut de_monde, &mut |_| {});
+        assert!(resultat.is_err());
+        assert_eq!(etat.transcript, vec![LigneTranscript::Joueur("j'attaque le fantôme".to_string())]);
     }
 
     #[test]

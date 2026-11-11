@@ -49,6 +49,7 @@ fn main() {
                 resumes: Vec::new(),
                 pnj_connus: Vec::new(),
                 premisse,
+                transcript: Vec::new(),
             }
         }
         Err(ErreurSauvegarde::Lecture(message)) => {

@@ -1,12 +1,12 @@
 use dioxus::prelude::*;
-use domain::EtatPartie;
+use domain::{EtatPartie, LigneTranscript};
 
-use crate::protocole::{LigneJournal, MessageVersWorker};
+use crate::protocole::{AffichageLigneTranscript, MessageVersWorker};
 
 #[component]
 pub fn Jeu(
     etat: EtatPartie,
-    journal: Vec<LigneJournal>,
+    journal: Vec<LigneTranscript>,
     narration_en_cours: String,
     tour_en_cours: bool,
     /// `Some((faces, etiquette))` tant que le worker attend que le joueur
