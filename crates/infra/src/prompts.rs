@@ -20,6 +20,12 @@ pub fn construire_prompt_introduction(personnage: &Personnage, lieu: &str, premi
     )
 }
 
+/// Inclut `description_memoire` (ce qui s'est passé jusqu'ici, voir
+/// `EtatPartie::resumes`) : sans elle, le modèle classifie l'intention du
+/// joueur sans aucune idée de l'histoire en cours, ce qui lui fait mal
+/// interpréter une action qui ne prend son sens qu'à la lumière d'un
+/// événement précédent (ex. "je lui rends son couteau" après une scène où
+/// un PNJ l'a laissé tomber).
 pub fn construire_prompt_classification(contexte: &ContexteTour) -> String {
     let combat_actif = contexte.etat.combat_en_cours.as_ref().map(|c| !c.termine).unwrap_or(false);
     // "attaquer"/"fuir"/"esquiver" ne font sens que si un combat est déjà
@@ -65,6 +71,7 @@ pub fn construire_prompt_classification(contexte: &ContexteTour) -> String {
          Le joueur se trouve à : {}.\n\
          {}\
          {}\
+         {}\
          Le joueur dit : \"{}\"\n\
          Dans sa saisie, le texte entre astérisques (*ainsi*) décrit un geste ou une action \
          physique du joueur, et le texte sans astérisques est ce qu'il dit à voix haute ; \
@@ -80,6 +87,7 @@ pub fn construire_prompt_classification(contexte: &ContexteTour) -> String {
          {}\
          {}",
         contexte.etat.lieu_actuel,
+        description_memoire(&contexte.etat),
         description_combat(&contexte.etat),
         description_personnage(&contexte.etat),
         contexte.saisie_joueur,
@@ -108,7 +116,11 @@ pub fn construire_prompt_narration(contexte: &ContexteResultat) -> String {
          Voici ce qui s'est réellement passé : {}\n\
          {}\
          Raconte cette scène de façon vivante et dramatique, en français, \
-         en deux ou trois phrases, sans jamais contredire ces faits ni inventer d'autres chiffres.",
+         en deux ou trois phrases, sans jamais contredire ces faits ni inventer d'autres chiffres. \
+         Ne fais avancer l'histoire que dans la mesure où l'action du joueur l'appelle : si elle \
+         est passive ou n'appelle aucune suite (observer, se reposer, discuter sans urgence), \
+         reste dans l'instant présent sans introduire de nouvel événement, danger ou personnage \
+         que le joueur n'a pas cherché.",
         description_premisse(&contexte.etat),
         description_memoire(&contexte.etat),
         description_pnj_pertinents(&contexte.etat, &contexte.action),
@@ -433,6 +445,22 @@ mod tests {
     }
 
     #[test]
+    fn le_prompt_de_classification_contient_les_resumes_accumules() {
+        let mut etat = etat_sans_combat();
+        etat.resumes = vec!["Elowen a quitté le village.".to_string()];
+        let contexte = ContexteTour { etat, saisie_joueur: "Je lui rends son couteau".to_string() };
+        let prompt = construire_prompt_classification(&contexte);
+        assert!(prompt.contains("Elowen a quitté le village."));
+    }
+
+    #[test]
+    fn le_prompt_de_classification_ne_mentionne_pas_de_memoire_si_resumes_est_vide() {
+        let contexte = ContexteTour { etat: etat_sans_combat(), saisie_joueur: "J'observe".to_string() };
+        let prompt = construire_prompt_classification(&contexte);
+        assert!(!prompt.contains("Ce qui s'est passé jusqu'ici"));
+    }
+
+    #[test]
     fn le_prompt_de_classification_mentionne_les_pv_du_joueur() {
         let contexte = ContexteTour {
             etat: etat_sans_combat(),
@@ -542,6 +570,17 @@ mod tests {
         };
         let prompt = construire_prompt_narration(&contexte);
         assert!(prompt.contains("Elowen a quitté le village."));
+    }
+
+    #[test]
+    fn le_prompt_de_narration_demande_de_ne_pas_forcer_la_suite_de_l_histoire() {
+        let contexte = ContexteResultat {
+            etat: etat_sans_combat(),
+            action: ActionJoueur::ActionLibre { texte: "J'observe".into(), agressif: false },
+            resume_mecanique: vec![],
+        };
+        let prompt = construire_prompt_narration(&contexte);
+        assert!(prompt.contains("Ne fais avancer l'histoire que dans la mesure où l'action du joueur l'appelle"));
     }
 
     #[test]

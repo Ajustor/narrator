@@ -17,9 +17,36 @@ use std::path::Path;
 
 const TAILLE_CONTEXTE: u32 = 4096;
 const TOKENS_MAX_CLASSIFICATION: i32 = 100;
-const TOKENS_MAX_NARRATION: i32 = 200;
+// Un modèle léger (ex. Qwen2.5-1.5B) est moins concis qu'un modèle plus
+// costaud pour la même consigne ("deux ou trois phrases") et atteint donc
+// ce plafond plus souvent, coupant sa dernière phrase en plein milieu —
+// signalé en jeu. Relevé de 200 à 300 pour que ça arrive moins souvent ;
+// `tronquer_phrase_incomplete` reste le filet de sécurité qui garantit
+// qu'on n'affiche jamais une phrase visiblement inachevée, quel que soit
+// ce plafond.
+const TOKENS_MAX_NARRATION: i32 = 300;
 const TOKENS_MAX_CONDENSATION: i32 = 150;
 const TOKENS_MAX_DETECTION_PNJ: i32 = 100;
+
+/// Coupe `texte` au dernier signe de fin de phrase (`.`, `!`, `?`, `…`,
+/// `»`) rencontré, pour ne jamais renvoyer une phrase visiblement
+/// inachevée quand la génération a été interrompue par le plafond de
+/// tokens plutôt que par le modèle lui-même (voir l'appel dans
+/// `generer`). Au pire, ça perd la toute dernière phrase en cours de
+/// génération plutôt que d'en afficher la moitié. Si aucun signe de fin
+/// de phrase n'est trouvé (texte très court, ou sortie JSON sans
+/// ponctuation — voir `generer`), renvoie le texte tel quel plutôt que de
+/// le vider entièrement.
+fn tronquer_phrase_incomplete(texte: &str) -> &str {
+    const TERMINATEURS: [char; 5] = ['.', '!', '?', '…', '»'];
+    match texte.rfind(|c: char| TERMINATEURS.contains(&c)) {
+        Some(i) => {
+            let longueur_caractere = texte[i..].chars().next().map(|c| c.len_utf8()).unwrap_or(0);
+            &texte[..i + longueur_caractere]
+        }
+        None => texte,
+    }
+}
 
 pub struct LlamaNarrateur {
     backend: LlamaBackend,
@@ -135,11 +162,17 @@ impl LlamaNarrateur {
         let mut sortie = String::new();
         let mut n_cur = batch.n_tokens();
         let n_len = n_cur + max_tokens;
+        // Reste à `true` tant que la boucle n'a pas vu de token de fin de
+        // génération (EOG) — si elle se termine par épuisement du budget
+        // plutôt que par ce `break`, `sortie` peut s'arrêter en plein
+        // milieu d'une phrase (voir `tronquer_phrase_incomplete`).
+        let mut coupe_par_budget = true;
 
         while n_cur <= n_len {
             let token = sampler.sample(&ctx, batch.n_tokens() - 1);
             sampler.accept(token);
             if self.model.vocab().is_eog(token) {
+                coupe_par_budget = false;
                 break;
             }
 
@@ -159,6 +192,9 @@ impl LlamaNarrateur {
             ctx.decode(&mut batch).map_err(|e| format!("échec de décodage : {e}"))?;
         }
 
+        if coupe_par_budget {
+            sortie = tronquer_phrase_incomplete(&sortie).to_string();
+        }
         Ok(sortie)
     }
 }
@@ -239,6 +275,7 @@ impl Narrateur for LlamaNarrateur {
 }
 #[cfg(test)]
 mod tests {
+    use super::tronquer_phrase_incomplete;
     use crate::action_schema::construire_schema_action;
     use domain::{Caracteristiques, Combat, De, EffetObjet, Ennemi, EtatPartie, Objet, Personnage};
 
@@ -333,5 +370,41 @@ mod tests {
             .iter()
             .any(|o| !matches!(o.effet, Some(EffetObjet::Consommable { .. }))));
         verifier_schema_convertible(&etat);
+    }
+
+    #[test]
+    fn tronquer_phrase_incomplete_coupe_a_la_derniere_ponctuation() {
+        let texte = "Le vent se lève. Un bruit retentit au loin et le";
+        assert_eq!(tronquer_phrase_incomplete(texte), "Le vent se lève.");
+    }
+
+    #[test]
+    fn tronquer_phrase_incomplete_garde_un_texte_deja_complet() {
+        let texte = "Le vent se lève. Un bruit retentit au loin !";
+        assert_eq!(tronquer_phrase_incomplete(texte), texte);
+    }
+
+    #[test]
+    fn tronquer_phrase_incomplete_reconnait_les_points_de_suspension_et_le_guillemet_fermant() {
+        assert_eq!(tronquer_phrase_incomplete("Elle hésite… puis"), "Elle hésite…");
+        assert_eq!(tronquer_phrase_incomplete("«Qui va là ?» dit-elle soudain"), "«Qui va là ?»");
+    }
+
+    #[test]
+    fn tronquer_phrase_incomplete_renvoie_le_texte_tel_quel_sans_aucune_ponctuation() {
+        // Cas d'une sortie JSON (pas de phrase) ou d'une coupure si précoce
+        // qu'aucun signe de fin de phrase n'a encore été généré : mieux
+        // vaut renvoyer le texte complet que de le vider.
+        let texte = "{\"action\": \"libre\"}";
+        assert_eq!(tronquer_phrase_incomplete(texte), texte);
+    }
+
+    #[test]
+    fn tronquer_phrase_incomplete_reste_sur_une_frontiere_utf8_valide() {
+        // "…" et "»" sont des caractères multi-octets en UTF-8 : couper
+        // juste après eux sans tenir compte de leur longueur réelle
+        // panique (slice index not on char boundary).
+        let texte = "Elle hésite…";
+        assert_eq!(tronquer_phrase_incomplete(texte), texte);
     }
 }
