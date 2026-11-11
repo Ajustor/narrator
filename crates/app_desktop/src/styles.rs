@@ -278,6 +278,38 @@ html, body {
     50% { opacity: 1; }
 }
 
+/* Indicateur de chargement générique (reprise d'une histoire, création en
+   cours) — là où une attente notable (chargement du modèle) n'avait
+   jusqu'ici aucun retour visuel. */
+.chargement-ligne {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: var(--text-dim);
+    font-size: 0.9rem;
+    margin-bottom: 0.75rem;
+}
+
+.spinner {
+    display: inline-block;
+    width: 1rem;
+    height: 1rem;
+    flex-shrink: 0;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: rotation-spinner 0.7s linear infinite;
+}
+
+@keyframes rotation-spinner {
+    to { transform: rotate(360deg); }
+}
+
+.ligne-histoire-desactivee {
+    opacity: 0.5;
+    cursor: default;
+}
+
 .zone-saisie {
     display: flex;
     gap: 0.5rem;

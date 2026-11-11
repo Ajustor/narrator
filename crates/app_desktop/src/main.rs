@@ -142,6 +142,20 @@ fn App() -> Element {
     // à `None` à chaque nouvelle demande (`DeDemande`) pour ne jamais
     // montrer le résultat d'un jet précédent sur un dé qui attend encore.
     let mut dernier_resultat_de: Signal<Option<u32>> = use_signal(|| None);
+    // Compteur incrémenté à chaque nouvelle demande de jet (`DeDemande`) —
+    // permet à la minuterie de fermeture ci-dessous (déclenchée par
+    // `DeResultat`) de vérifier qu'aucun AUTRE jet n'a été demandé entre
+    // temps (attaque puis dégâts, par ex.) avant de fermer le dialogue :
+    // sans cette vérification, la minuterie du premier jet fermerait aussi
+    // le dialogue du second, pourtant toujours en attente d'un tap.
+    let mut jet_de_generation = use_signal(|| 0u64);
+    // Chargement avant `Vue::Jeu` (reprise d'une histoire existante ou
+    // création d'un nouveau personnage) : les deux passent par le
+    // chargement du modèle de langage (`infra::LlamaNarrateur::charger`,
+    // voir `worker.rs`), qui peut prendre plusieurs secondes sans qu'aucun
+    // message intermédiaire ne soit émis avant `PartieCreee` — sans cet
+    // indicateur, l'écran reste visuellement figé pendant tout ce temps.
+    let mut chargement_pre_jeu = use_signal(|| false);
     // Bannière de mise à jour (Android seulement en pratique — voir
     // `worker::lancer`, qui n'envoie `MiseAJourDisponible` que sous
     // `plateforme-android` — mais ce signal et son rendu restent
@@ -181,6 +195,7 @@ fn App() -> Element {
         while let Some(message) = rx.next().await {
             match message {
                 MessageVersUi::ListeHistoires(histoires) => {
+                    chargement_pre_jeu.set(false);
                     vue.set(Vue::SelectionHistoire(histoires));
                 }
                 MessageVersUi::ValeursProposees(valeurs) => {
@@ -211,6 +226,7 @@ fn App() -> Element {
                     journal.set(e.transcript.clone());
                     narration_en_cours.set(String::new());
                     tour_en_cours.set(false);
+                    chargement_pre_jeu.set(false);
                     etat.set(Some(e));
                     vue.set(Vue::Jeu);
                 }
@@ -268,6 +284,7 @@ fn App() -> Element {
                         tour_en_cours.set(false);
                         faire_defiler_journal();
                     } else {
+                        chargement_pre_jeu.set(false);
                         erreur_pre_jeu.set(Some(message));
                     }
                 }
@@ -280,11 +297,27 @@ fn App() -> Element {
                     vue.set(Vue::ConfirmationTelechargement { palette, taille_octets });
                 }
                 MessageVersUi::DeDemande { faces, etiquette } => {
+                    jet_de_generation += 1;
                     dernier_resultat_de.set(None);
                     de_en_attente.set(Some((faces, etiquette)));
                 }
                 MessageVersUi::DeResultat(valeur) => {
                     dernier_resultat_de.set(Some(valeur));
+                    // Ferme le dialogue de dé peu après l'affichage du
+                    // résultat plutôt que d'attendre la fin du tour entier
+                    // (narration complète) — sans quoi le dé masque tout
+                    // l'écran pendant toute la génération, bien après que
+                    // le joueur a vu son résultat. `generation_a_la_fermeture`
+                    // laisse passer cette fermeture seulement si AUCUN
+                    // nouveau jet n'a été demandé depuis (voir
+                    // `jet_de_generation` ci-dessus).
+                    let generation_a_la_fermeture = jet_de_generation();
+                    spawn(async move {
+                        tokio::time::sleep(std::time::Duration::from_millis(700)).await;
+                        if jet_de_generation() == generation_a_la_fermeture {
+                            de_en_attente.set(None);
+                        }
+                    });
                 }
                 MessageVersUi::MiseAJourDisponible { version, url_apk } => {
                     // Une VRAIE nouvelle annonce : l'ignorance d'une
@@ -338,8 +371,16 @@ fn App() -> Element {
             SelectionHistoire {
                 histoires,
                 erreur: erreur_pre_jeu(),
+                chargement: chargement_pre_jeu(),
                 sur_message: move |msg| {
                     erreur_pre_jeu.set(None);
+                    // Seule la reprise charge le modèle (voir `worker.rs`) —
+                    // `SupprimerHistoire` revient à la liste presque
+                    // immédiatement, donc inutile d'afficher un chargement
+                    // pour cette action.
+                    if matches!(msg, MessageVersWorker::ReprendreHistoire(_)) {
+                        chargement_pre_jeu.set(true);
+                    }
                     let _ = tx.send(msg);
                 },
                 sur_nouvelle_histoire: move |_| {
@@ -352,7 +393,11 @@ fn App() -> Element {
         Vue::Creation(valeurs_proposees) => rsx! {
             Creation {
                 valeurs_proposees,
-                sur_creation: move |msg| { let _ = tx.send(msg); }
+                chargement: chargement_pre_jeu(),
+                sur_creation: move |msg| {
+                    chargement_pre_jeu.set(true);
+                    let _ = tx.send(msg);
+                }
             }
         },
         Vue::Jeu => {

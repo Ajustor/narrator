@@ -7,6 +7,10 @@ use crate::protocole::MessageVersWorker;
 pub fn SelectionHistoire(
     histoires: Vec<InfoHistoire>,
     erreur: Option<String>,
+    /// `true` tant qu'une reprise d'histoire est en cours (chargement du
+    /// modèle, voir `main.rs`) — affiche un indicateur visuel et bloque les
+    /// autres actions pour éviter un double déclenchement.
+    chargement: bool,
     sur_message: EventHandler<MessageVersWorker>,
     sur_nouvelle_histoire: EventHandler<()>,
 ) -> Element {
@@ -24,16 +28,26 @@ pub fn SelectionHistoire(
                 if let Some(message) = erreur {
                     p { class: "avertissement", "⚠ {message}" }
                 }
+                if chargement {
+                    div { class: "chargement-ligne",
+                        span { class: "spinner" }
+                        span { "Chargement de l'histoire…" }
+                    }
+                }
                 if histoires.is_empty() {
                     p { "Aucune histoire pour l'instant." }
                 } else {
                     for histoire in histoires.iter() {
                         div {
                             key: "{histoire.id}",
-                            class: "pnj ligne-histoire",
+                            class: if chargement { "pnj ligne-histoire ligne-histoire-desactivee" } else { "pnj ligne-histoire" },
                             onclick: {
                                 let id = histoire.id.clone();
-                                move |_| sur_message.call(MessageVersWorker::ReprendreHistoire(id.clone()))
+                                move |_| {
+                                    if !chargement {
+                                        sur_message.call(MessageVersWorker::ReprendreHistoire(id.clone()));
+                                    }
+                                }
                             },
                             div {
                                 strong { "{histoire.nom_personnage}" }
@@ -44,6 +58,7 @@ pub fn SelectionHistoire(
                                     span { "Supprimer définitivement ?" }
                                     button {
                                         class: "bouton-danger",
+                                        disabled: chargement,
                                         onclick: {
                                             let id = histoire.id.clone();
                                             move |evt: Event<MouseData>| {
@@ -66,6 +81,7 @@ pub fn SelectionHistoire(
                             } else {
                                 button {
                                     class: "bouton-supprimer",
+                                    disabled: chargement,
                                     onclick: {
                                         let id = histoire.id.clone();
                                         move |evt: Event<MouseData>| {

@@ -9,7 +9,14 @@ const NOMS_CARACTERISTIQUES: [&str; 6] =
     ["Force", "Dextérité", "Constitution", "Intelligence", "Sagesse", "Charisme"];
 
 #[component]
-pub fn Creation(valeurs_proposees: [u32; 6], sur_creation: EventHandler<MessageVersWorker>) -> Element {
+pub fn Creation(
+    valeurs_proposees: [u32; 6],
+    /// `true` tant que la création est en cours côté worker (chargement du
+    /// modèle puis génération de l'introduction, voir `main.rs`/`worker.rs`)
+    /// — affiche un indicateur visuel et bloque un second envoi.
+    chargement: bool,
+    sur_creation: EventHandler<MessageVersWorker>,
+) -> Element {
     let mut nom = use_signal(String::new);
     let mut classe = use_signal(|| CLASSES_VALIDES[0].to_string());
     // Pour chaque caractéristique (Force, Dextérité, ...), l'INDEX dans
@@ -138,7 +145,7 @@ pub fn Creation(valeurs_proposees: [u32; 6], sur_creation: EventHandler<MessageV
                 }
                 button {
                     class: "bouton-principal",
-                    disabled: nom().trim().is_empty() || !toutes_valeurs_choisies(),
+                    disabled: chargement || nom().trim().is_empty() || !toutes_valeurs_choisies(),
                     onclick: move |_| {
                         let valeurs = origines().map(|o| o.map(|i| valeurs_proposees[i]).unwrap_or(0));
                         sur_creation.call(MessageVersWorker::CreerPersonnage {
@@ -151,6 +158,12 @@ pub fn Creation(valeurs_proposees: [u32; 6], sur_creation: EventHandler<MessageV
                         });
                     },
                     "Commencer l'aventure"
+                }
+                if chargement {
+                    div { class: "chargement-ligne",
+                        span { class: "spinner" }
+                        span { "Création de l'histoire en cours…" }
+                    }
                 }
             }
         }

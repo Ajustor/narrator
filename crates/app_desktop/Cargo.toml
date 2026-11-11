@@ -36,6 +36,12 @@ infra = { path = "../infra" }
 dioxus = { version = "0.7", default-features = false, features = ["document", "macro", "hooks", "signals", "html", "launch", "logger"] }
 futures-channel = "0.3"
 futures-util = "0.3"
+# Minuterie pour fermer le dialogue de dé plus vite que la fin du tour
+# (voir `main.rs`, fermeture de `de_en_attente`) — `dioxus-desktop` fait
+# déjà tourner un runtime tokio complet (confirmé dans `Cargo.lock`), donc
+# cette dépendance n'ajoute aucun runtime supplémentaire, seulement l'accès
+# direct à `tokio::time::sleep` depuis ce crate.
+tokio = { version = "1", default-features = false, features = ["time"] }
 # `features = ["tls"]` et non `["rustls"]` : dans ureq 2.x, `rustls` n'est
 # que le nom de la dépendance optionnelle — l'activer seul ne branche
 # aucun connecteur TLS, et tout appel HTTPS échoue immédiatement avec
