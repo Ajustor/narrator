@@ -109,14 +109,17 @@ pub fn construire_prompt_narration(contexte: &ContexteResultat) -> String {
         "{}\
          {}\
          {}\
-         Le joueur a tenté : {:?}.\n\
+         Le joueur a dit ou fait exactement : \"{}\"\n\
          Dans sa saisie, le texte entre astérisques (*ainsi*) décrit un geste ou une action \
          physique du joueur, et le texte sans astérisques est ce qu'il dit à voix haute ; \
          ne transforme pas une action physique en réplique citée.\n\
+         Ce qui a été résolu mécaniquement : {:?}.\n\
          Voici ce qui s'est réellement passé : {}\n\
          {}\
          Raconte cette scène de façon vivante et dramatique, en français, \
-         en deux ou trois phrases, sans jamais contredire ces faits ni inventer d'autres chiffres. \
+         en deux ou trois phrases, en reprenant les détails précis de la phrase du joueur \
+         ci-dessus (arme, manière, formulation) plutôt qu'une version générique, sans jamais \
+         contredire ces faits ni inventer d'autres chiffres. \
          Ne fais avancer l'histoire que dans la mesure où l'action du joueur l'appelle : si elle \
          est passive ou n'appelle aucune suite (observer, se reposer, discuter sans urgence), \
          reste dans l'instant présent sans introduire de nouvel événement, danger ou personnage \
@@ -124,6 +127,7 @@ pub fn construire_prompt_narration(contexte: &ContexteResultat) -> String {
         description_premisse(&contexte.etat),
         description_memoire(&contexte.etat),
         description_pnj_pertinents(&contexte.etat, &contexte.action),
+        contexte.saisie_joueur,
         contexte.action,
         resultat,
         description_etat_apres_resolution(&contexte.etat),
@@ -386,10 +390,30 @@ mod tests {
             etat: etat_en_combat(),
             action: ActionJoueur::Attaquer { cible: "Gobelin".into() },
             resume_mecanique: vec!["🎲 Tu attaques Gobelin : touché ! Dégâts : 5".to_string()],
+            saisie_joueur: "j'attaque le gobelin".to_string(),
         };
         let prompt = construire_prompt_narration(&contexte);
         assert!(prompt.contains("touché"));
         assert!(prompt.contains("Dégâts : 5"));
+    }
+
+    #[test]
+    fn le_prompt_de_narration_contient_la_formulation_exacte_du_joueur_meme_pour_une_action_structuree() {
+        // `ActionJoueur::Attaquer` (comme `UtiliserObjet`/`Fuir`/`Esquiver`/
+        // `ProvoquerCombat`) ne garde que des champs structurés (cible,
+        // objet...) — la formulation précise du joueur ("avec ma dague,
+        // en visant la gorge") n'y survit pas. Sans `saisie_joueur`, la
+        // narration ne verrait donc jamais cette formulation dès que
+        // l'action est classifiée hors "libre" — la cause probable du
+        // rapport « mes actions ne sont pas prises en compte ».
+        let contexte = ContexteResultat {
+            etat: etat_en_combat(),
+            action: ActionJoueur::Attaquer { cible: "Gobelin".into() },
+            resume_mecanique: vec!["🎲 Tu attaques Gobelin : touché ! Dégâts : 5".to_string()],
+            saisie_joueur: "j'attaque le gobelin avec ma dague, en visant la gorge".to_string(),
+        };
+        let prompt = construire_prompt_narration(&contexte);
+        assert!(prompt.contains("avec ma dague, en visant la gorge"));
     }
 
     #[test]
@@ -398,6 +422,7 @@ mod tests {
             etat: etat_sans_combat(),
             action: ActionJoueur::ActionLibre { texte: "J'observe".into(), agressif: false },
             resume_mecanique: vec![],
+            saisie_joueur: "J'observe".to_string(),
         };
         let prompt = construire_prompt_narration(&contexte);
         assert!(!prompt.is_empty());
@@ -419,6 +444,7 @@ mod tests {
             etat: etat_sans_combat(),
             action: ActionJoueur::ActionLibre { texte: "J'observe".into(), agressif: false },
             resume_mecanique: vec![],
+            saisie_joueur: "J'observe".to_string(),
         };
         let prompt = construire_prompt_narration(&contexte);
         assert!(prompt.contains("Elowen"));
@@ -440,6 +466,7 @@ mod tests {
             etat: etat_sans_combat(),
             action: ActionJoueur::ActionLibre { texte: "*je dégaine mon épée*".into(), agressif: false },
             resume_mecanique: vec![],
+            saisie_joueur: "*je dégaine mon épée*".to_string(),
         };
         let prompt = construire_prompt_narration(&contexte);
         assert!(prompt.contains("astérisque"));
@@ -527,6 +554,7 @@ mod tests {
             etat: etat.clone(),
             action: ActionJoueur::ActionLibre { texte: "J'observe".into(), agressif: false },
             resume_mecanique: vec![],
+            saisie_joueur: "J'observe".to_string(),
         };
         let prompt = construire_prompt_narration(&contexte);
         assert!(prompt.contains(&format!("{}/{}", etat.personnage.pv_actuels, etat.personnage.pv_max)));
@@ -539,6 +567,7 @@ mod tests {
             etat: etat.clone(),
             action: ActionJoueur::Attaquer { cible: "Gobelin".into() },
             resume_mecanique: vec!["🎲 Tu attaques Gobelin : touché ! Dégâts : 2".to_string()],
+            saisie_joueur: "j'attaque le gobelin".to_string(),
         };
         let prompt = construire_prompt_narration(&contexte);
         let gobelin = &etat.combat_en_cours.as_ref().unwrap().ennemis[0];
@@ -568,6 +597,7 @@ mod tests {
             etat,
             action: ActionJoueur::ActionLibre { texte: "J'observe".into(), agressif: false },
             resume_mecanique: vec![],
+            saisie_joueur: "J'observe".to_string(),
         };
         let prompt = construire_prompt_narration(&contexte);
         assert!(prompt.contains("Elowen a quitté le village."));
@@ -579,6 +609,7 @@ mod tests {
             etat: etat_sans_combat(),
             action: ActionJoueur::ActionLibre { texte: "J'observe".into(), agressif: false },
             resume_mecanique: vec![],
+            saisie_joueur: "J'observe".to_string(),
         };
         let prompt = construire_prompt_narration(&contexte);
         assert!(prompt.contains("Ne fais avancer l'histoire que dans la mesure où l'action du joueur l'appelle"));
@@ -590,6 +621,7 @@ mod tests {
             etat: etat_sans_combat(),
             action: ActionJoueur::ActionLibre { texte: "J'observe".into(), agressif: false },
             resume_mecanique: vec![],
+            saisie_joueur: "J'observe".to_string(),
         };
         let prompt = construire_prompt_narration(&contexte);
         assert!(!prompt.contains("Ce qui s'est passé jusqu'ici"));
@@ -607,6 +639,7 @@ mod tests {
             etat,
             action: ActionJoueur::ActionLibre { texte: "Je parle à Aldric".into(), agressif: false },
             resume_mecanique: vec![],
+            saisie_joueur: "Je parle à Aldric".to_string(),
         };
         let prompt = construire_prompt_narration(&contexte);
         assert!(prompt.contains("Aldric"));
@@ -625,6 +658,7 @@ mod tests {
             etat,
             action: ActionJoueur::ActionLibre { texte: "Je regarde le ciel".into(), agressif: false },
             resume_mecanique: vec![],
+            saisie_joueur: "Je regarde le ciel".to_string(),
         };
         let prompt = construire_prompt_narration(&contexte);
         assert!(!prompt.contains("Aldric"));
@@ -642,6 +676,7 @@ mod tests {
             etat,
             action: ActionJoueur::ActionLibre { texte: "Je parle à Aldric".into(), agressif: false },
             resume_mecanique: vec![],
+            saisie_joueur: "Je parle à Aldric".to_string(),
         };
         let prompt = construire_prompt_narration(&contexte);
         assert!(prompt.contains("Aldric"));
@@ -681,6 +716,7 @@ mod tests {
             etat: etat_sans_combat(),
             action: ActionJoueur::ActionLibre { texte: "J'observe".into(), agressif: false },
             resume_mecanique: vec![],
+            saisie_joueur: "J'observe".to_string(),
         };
         contexte.etat.premisse = PremisseHistoire { genre: Genre::Horreur, description: "une vieille malédiction".into() };
         let prompt = construire_prompt_narration(&contexte);
@@ -734,6 +770,7 @@ mod tests {
             etat: etat_sans_combat(),
             action: ActionJoueur::ActionLibre { texte: "J'observe".into(), agressif: false },
             resume_mecanique: vec![],
+            saisie_joueur: "J'observe".to_string(),
         };
         contexte.etat.premisse = PremisseHistoire { genre: Genre::FantasyMedievale, description: longue.clone() };
         let prompt = construire_prompt_narration(&contexte);

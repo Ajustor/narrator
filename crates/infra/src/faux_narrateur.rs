@@ -174,6 +174,7 @@ mod tests {
             etat: ctx.etat,
             action: ActionJoueur::ActionLibre { texte: "J'observe".into(), agressif: false },
             resume_mecanique: vec![],
+            saisie_joueur: "J'observe".to_string(),
         };
         let mut narrateur = FauxNarrateur;
         let mut fragments = Vec::new();
@@ -191,6 +192,7 @@ mod tests {
             etat: ctx.etat,
             action: ActionJoueur::Attaquer { cible: "Gobelin".into() },
             resume_mecanique: vec!["🎲 Tu attaques Gobelin : touché ! Dégâts : 5".to_string()],
+            saisie_joueur: "j'attaque le gobelin".to_string(),
         };
         let mut narrateur = FauxNarrateur;
         let narration = narrateur.raconter_resultat(&ctx_resultat, &mut |_| {}).unwrap();

@@ -11,6 +11,17 @@ pub struct ContexteResultat {
     pub etat: EtatPartie,
     pub action: ActionJoueur,
     pub resume_mecanique: Vec<String>,
+    /// Saisie textuelle brute du joueur, verbatim — `action` seul ne la
+    /// garde que pour `ActionJoueur::ActionLibre` (son champ `texte`) ;
+    /// pour toute autre variante (`Attaquer`, `UtiliserObjet`, `Fuir`,
+    /// `Esquiver`, `ProvoquerCombat`), la classification ne conserve que
+    /// des champs structurés (cible, objet...) et jette la formulation du
+    /// joueur. Sans ce champ, `construire_prompt_narration` (dans
+    /// `infra`) ne peut donc raconter qu'une version générique de
+    /// l'action du joueur dès qu'elle est classifiée dans l'une de ces
+    /// variantes — la cause probable du rapport « mes actions ne sont pas
+    /// prises en compte » pour toute action un peu détaillée.
+    pub saisie_joueur: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]

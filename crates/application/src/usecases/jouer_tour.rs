@@ -525,6 +525,7 @@ impl JouerTour {
             etat: etat.clone(),
             action: action_proposee,
             resume_mecanique: resume.clone(),
+            saisie_joueur: saisie.to_string(),
         };
         let narration = narrateur
             .raconter_resultat(&contexte_resultat, sur_fragment)
