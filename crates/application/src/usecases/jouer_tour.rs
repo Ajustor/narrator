@@ -944,6 +944,10 @@ mod tests {
             sur_fragment("introduction de test");
             Ok("introduction de test".to_string())
         }
+
+        fn generer_lieu_initial(&mut self, _genre: domain::Genre, _premisse_libre: &str) -> Result<String, ErreurNarrateur> {
+            Ok("lieu de test".to_string())
+        }
     }
 
     #[test]
@@ -1183,6 +1187,10 @@ mod tests {
         ) -> Result<String, ErreurNarrateur> {
             Ok(String::new())
         }
+
+        fn generer_lieu_initial(&mut self, _genre: domain::Genre, _premisse_libre: &str) -> Result<String, ErreurNarrateur> {
+            Ok(String::new())
+        }
     }
 
     struct NarrateurCondensateur {
@@ -1226,6 +1234,10 @@ mod tests {
         ) -> Result<String, ErreurNarrateur> {
             Ok(String::new())
         }
+
+        fn generer_lieu_initial(&mut self, _genre: domain::Genre, _premisse_libre: &str) -> Result<String, ErreurNarrateur> {
+            Ok(String::new())
+        }
     }
 
     struct NarrateurDetectionPnj {
@@ -1265,6 +1277,10 @@ mod tests {
             _premisse: &domain::PremisseHistoire,
             _sur_fragment: &mut dyn FnMut(&str),
         ) -> Result<String, ErreurNarrateur> {
+            Ok(String::new())
+        }
+
+        fn generer_lieu_initial(&mut self, _genre: domain::Genre, _premisse_libre: &str) -> Result<String, ErreurNarrateur> {
             Ok(String::new())
         }
     }

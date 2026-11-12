@@ -2,10 +2,10 @@ use crate::action_schema::interpreter_ou_repli_libre;
 use crate::detection_pnj::interpreter_json_detection_pnj;
 use crate::prompts::{
     construire_prompt_classification, construire_prompt_condensation, construire_prompt_detection_pnj,
-    construire_prompt_introduction, construire_prompt_narration,
+    construire_prompt_introduction, construire_prompt_lieu_initial, construire_prompt_narration,
 };
 use application::ports::narrateur::{ContexteResultat, ContexteTour, ErreurNarrateur, Narrateur, PnjDetecte};
-use domain::{ActionJoueur, Personnage, PremisseHistoire};
+use domain::{ActionJoueur, Genre, Personnage, PremisseHistoire};
 use llama_cpp_2::context::params::LlamaContextParams;
 use llama_cpp_2::llama_backend::LlamaBackend;
 use llama_cpp_2::llama_batch::LlamaBatch;
@@ -27,6 +27,7 @@ const TOKENS_MAX_CLASSIFICATION: i32 = 100;
 const TOKENS_MAX_NARRATION: i32 = 300;
 const TOKENS_MAX_CONDENSATION: i32 = 150;
 const TOKENS_MAX_DETECTION_PNJ: i32 = 100;
+const TOKENS_MAX_LIEU_INITIAL: i32 = 40;
 
 /// Coupe `texte` au dernier signe de fin de phrase (`.`, `!`, `?`, `…`,
 /// `»`) rencontré, pour ne jamais renvoyer une phrase visiblement
@@ -270,6 +271,12 @@ impl Narrateur for LlamaNarrateur {
     ) -> Result<String, ErreurNarrateur> {
         let prompt = construire_prompt_introduction(personnage, lieu, premisse);
         self.generer(&prompt, TOKENS_MAX_NARRATION, None, sur_fragment)
+            .map_err(ErreurNarrateur::EchecGeneration)
+    }
+
+    fn generer_lieu_initial(&mut self, genre: Genre, premisse_libre: &str) -> Result<String, ErreurNarrateur> {
+        let prompt = construire_prompt_lieu_initial(genre, premisse_libre);
+        self.generer(&prompt, TOKENS_MAX_LIEU_INITIAL, None, &mut |_| {})
             .map_err(ErreurNarrateur::EchecGeneration)
     }
 }

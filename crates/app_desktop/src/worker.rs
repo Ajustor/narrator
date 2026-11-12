@@ -211,6 +211,25 @@ pub fn creer_nouvelle_histoire(
     })
 }
 
+/// Détermine le lieu de départ une fois le modèle chargé (appelé depuis
+/// `lancer()`, jamais depuis `creer_nouvelle_histoire` qui reste pur et
+/// synchrone). Si le joueur a écrit une prémisse libre, demande au
+/// narrateur un lieu cohérent avec elle plutôt que de se contenter du
+/// lieu générique associé au seul genre (`Genre::lieu_initial`) — sans
+/// ça, toute histoire démarrait dans un lieu identique pour un même
+/// genre, sans aucun rapport avec ce que le joueur a lui-même décrit.
+/// Repli silencieux sur `Genre::lieu_initial` si la prémisse est vide ou
+/// si la génération échoue : ne doit jamais bloquer la création d'une
+/// histoire.
+fn determiner_lieu_initial(narrateur: &mut dyn Narrateur, genre: Genre, premisse_libre: &str) -> String {
+    if premisse_libre.trim().is_empty() {
+        return genre.lieu_initial().to_string();
+    }
+    narrateur
+        .generer_lieu_initial(genre, premisse_libre)
+        .unwrap_or_else(|_| genre.lieu_initial().to_string())
+}
+
 /// Charge l'état d'une histoire existante depuis son fichier de
 /// sauvegarde. Séparé de `lancer()` pour rester testable isolément (Review
 /// Focus : fichier absent ou corrompu doit produire une erreur propre,
@@ -440,7 +459,7 @@ pub fn lancer(
             });
         }
 
-        let (id, info, etat_initial, deja_enregistree) = loop {
+        let (id, info, mut etat_initial, deja_enregistree) = loop {
             match rx.recv() {
                 Ok(MessageVersWorker::ReprendreHistoire(id_choisie)) => {
                     let Some(info) = histoires_existantes.iter().find(|h| h.id == id_choisie).cloned() else {
@@ -582,6 +601,19 @@ pub fn lancer(
         let chemin_sauvegarde_histoire = histoires::chemin_sauvegarde(&repertoire_sauvegardes, &id);
         let sauvegarde = infra::SauvegardeFichier::nouveau(chemin_sauvegarde_histoire.clone());
 
+        // Nouvelle histoire seulement : le lieu de départ ne peut être
+        // affiné sur la prémisse libre qu'une fois le modèle chargé (voir
+        // `determiner_lieu_initial`) — avant `PartieCreee` pour que l'UI
+        // n'affiche jamais le lieu générique avant de basculer sur celui
+        // tiré de la prémisse.
+        if !deja_enregistree {
+            etat_initial.lieu_actuel = determiner_lieu_initial(
+                &mut narrateur,
+                etat_initial.premisse.genre,
+                &etat_initial.premisse.description,
+            );
+        }
+
         // Nouvelle histoire seulement : l'enregistrer maintenant que le
         // modèle a réellement chargé — pas avant, pour ne jamais laisser
         // une entrée fantôme dans l'index si le chargement échoue ou si
@@ -646,6 +678,7 @@ pub fn lancer(
 mod tests {
     use super::*;
     use infra::SauvegardeFichier;
+    use std::cell::RefCell;
     use std::path::PathBuf;
 
     fn chemin_temporaire(nom: &str) -> PathBuf {
@@ -758,6 +791,104 @@ mod tests {
         assert_ne!(etat.lieu_actuel, "Clairière");
     }
 
+    struct NarrateurLieuFixe {
+        resultat: Result<String, application::ports::narrateur::ErreurNarrateur>,
+        genre_et_premisse_recus: RefCell<Option<(Genre, String)>>,
+    }
+
+    impl Narrateur for NarrateurLieuFixe {
+        fn proposer_action(
+            &mut self,
+            _contexte: &application::ports::narrateur::ContexteTour,
+        ) -> Result<domain::ActionJoueur, application::ports::narrateur::ErreurNarrateur> {
+            unimplemented!("non utilisé par ce test")
+        }
+
+        fn raconter_resultat(
+            &mut self,
+            _contexte: &application::ports::narrateur::ContexteResultat,
+            _sur_fragment: &mut dyn FnMut(&str),
+        ) -> Result<String, application::ports::narrateur::ErreurNarrateur> {
+            unimplemented!("non utilisé par ce test")
+        }
+
+        fn condenser_resumes(
+            &mut self,
+            _anciens: &[String],
+        ) -> Result<String, application::ports::narrateur::ErreurNarrateur> {
+            unimplemented!("non utilisé par ce test")
+        }
+
+        fn detecter_pnj(
+            &mut self,
+            _narration: &str,
+            _noms_connus: &[String],
+        ) -> Result<Option<application::ports::narrateur::PnjDetecte>, application::ports::narrateur::ErreurNarrateur> {
+            unimplemented!("non utilisé par ce test")
+        }
+
+        fn raconter_introduction(
+            &mut self,
+            _personnage: &domain::Personnage,
+            _lieu: &str,
+            _premisse: &domain::PremisseHistoire,
+            _sur_fragment: &mut dyn FnMut(&str),
+        ) -> Result<String, application::ports::narrateur::ErreurNarrateur> {
+            unimplemented!("non utilisé par ce test")
+        }
+
+        fn generer_lieu_initial(
+            &mut self,
+            genre: Genre,
+            premisse_libre: &str,
+        ) -> Result<String, application::ports::narrateur::ErreurNarrateur> {
+            *self.genre_et_premisse_recus.borrow_mut() = Some((genre, premisse_libre.to_string()));
+            match &self.resultat {
+                Ok(lieu) => Ok(lieu.clone()),
+                Err(application::ports::narrateur::ErreurNarrateur::EchecGeneration(message)) => {
+                    Err(application::ports::narrateur::ErreurNarrateur::EchecGeneration(message.clone()))
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn determiner_lieu_initial_se_contente_du_genre_si_la_premisse_est_vide() {
+        let mut narrateur = NarrateurLieuFixe {
+            resultat: Ok("ne doit jamais être utilisé".to_string()),
+            genre_et_premisse_recus: RefCell::new(None),
+        };
+        let lieu = determiner_lieu_initial(&mut narrateur, Genre::Horreur, "");
+        assert_eq!(lieu, Genre::Horreur.lieu_initial());
+        // Le narrateur ne doit même pas être sollicité quand il n'y a pas
+        // de prémisse libre à exploiter.
+        assert!(narrateur.genre_et_premisse_recus.borrow().is_none());
+    }
+
+    #[test]
+    fn determiner_lieu_initial_utilise_le_lieu_genere_a_partir_de_la_premisse() {
+        let mut narrateur = NarrateurLieuFixe {
+            resultat: Ok("une ruelle détrempée sous la pluie".to_string()),
+            genre_et_premisse_recus: RefCell::new(None),
+        };
+        let lieu = determiner_lieu_initial(&mut narrateur, Genre::PolarNoir, "une enquête sur un meurtre");
+        assert_eq!(lieu, "une ruelle détrempée sous la pluie");
+        assert_eq!(
+            narrateur.genre_et_premisse_recus.into_inner(),
+            Some((Genre::PolarNoir, "une enquête sur un meurtre".to_string())),
+        );
+    }
+
+    #[test]
+    fn determiner_lieu_initial_retombe_sur_le_genre_si_la_generation_echoue() {
+        let mut narrateur = NarrateurLieuFixe {
+            resultat: Err(application::ports::narrateur::ErreurNarrateur::EchecGeneration("panne".to_string())),
+            genre_et_premisse_recus: RefCell::new(None),
+        };
+        let lieu = determiner_lieu_initial(&mut narrateur, Genre::Steampunk, "une course de dirigeables");
+        assert_eq!(lieu, Genre::Steampunk.lieu_initial());
+    }
+
     /// Review Focus : reprendre une histoire dont le fichier est absent ou
     /// corrompu doit produire une erreur propre, pas une panique.
     #[test]
@@ -814,6 +945,14 @@ mod tests {
             _lieu: &str,
             _premisse: &domain::PremisseHistoire,
             _sur_fragment: &mut dyn FnMut(&str),
+        ) -> Result<String, application::ports::narrateur::ErreurNarrateur> {
+            Ok(String::new())
+        }
+
+        fn generer_lieu_initial(
+            &mut self,
+            _genre: domain::Genre,
+            _premisse_libre: &str,
         ) -> Result<String, application::ports::narrateur::ErreurNarrateur> {
             Ok(String::new())
         }
@@ -921,6 +1060,14 @@ mod tests {
         ) -> Result<String, application::ports::narrateur::ErreurNarrateur> {
             Ok(String::new())
         }
+
+        fn generer_lieu_initial(
+            &mut self,
+            _genre: domain::Genre,
+            _premisse_libre: &str,
+        ) -> Result<String, application::ports::narrateur::ErreurNarrateur> {
+            Ok(String::new())
+        }
     }
 
     #[test]
@@ -994,6 +1141,14 @@ mod tests {
             _lieu: &str,
             _premisse: &domain::PremisseHistoire,
             _sur_fragment: &mut dyn FnMut(&str),
+        ) -> Result<String, application::ports::narrateur::ErreurNarrateur> {
+            Ok(String::new())
+        }
+
+        fn generer_lieu_initial(
+            &mut self,
+            _genre: domain::Genre,
+            _premisse_libre: &str,
         ) -> Result<String, application::ports::narrateur::ErreurNarrateur> {
             Ok(String::new())
         }

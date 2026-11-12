@@ -1,5 +1,5 @@
 use application::ports::narrateur::{ContexteResultat, ContexteTour};
-use domain::{ActionJoueur, EffetObjet, EtatPartie, FichePnj, Personnage, PremisseHistoire};
+use domain::{ActionJoueur, EffetObjet, EtatPartie, FichePnj, Genre, Personnage, PremisseHistoire};
 
 const LONGUEUR_MAX_PREMISSE: usize = 300;
 
@@ -17,6 +17,25 @@ pub fn construire_prompt_introduction(personnage: &Personnage, lieu: &str, premi
          quatre phrases, sans combat, sans dialogue et sans inventer de personnage \
          non-joueur : seulement l'ambiance, le lieu et ce qui s'y trouve.",
         premisse.genre.indication_prompt(), description, personnage.classe, personnage.nom, lieu,
+    )
+}
+
+/// Appelé seulement quand `premisse_libre` n'est pas vide (voir
+/// `Narrateur::generer_lieu_initial`) : sans ce prompt, le lieu de départ
+/// ne dépendait que du genre choisi (`Genre::lieu_initial`), identique
+/// pour toute histoire du même genre, sans aucun rapport avec ce que le
+/// joueur a lui-même décrit dans sa prémisse libre.
+pub fn construire_prompt_lieu_initial(genre: Genre, premisse_libre: &str) -> String {
+    format!(
+        "Tu es le maître du jeu d'un jeu de rôle solo en français.\n\
+         Contexte de l'histoire : {}.\n\
+         Prémisse choisie par le joueur : \"{}\"\n\
+         En te basant sur cette prémisse, donne un lieu de départ court et concret pour \
+         cette histoire, cohérent avec elle et avec ce contexte. Réponds uniquement par ce \
+         lieu, formulé comme un complément de lieu (ex. \"une ruelle détrempée sous la pluie\"), \
+         en quelques mots, sans phrase complète, sans ponctuation finale, sans aucun autre texte.",
+        genre.indication_prompt(),
+        tronquer(premisse_libre, LONGUEUR_MAX_PREMISSE),
     )
 }
 
@@ -418,6 +437,13 @@ mod tests {
         };
         let prompt = construire_prompt_narration(&contexte);
         assert!(prompt.contains("avec ma dague, en visant la gorge"));
+    }
+
+    #[test]
+    fn le_prompt_de_lieu_initial_contient_la_premisse_et_le_genre() {
+        let prompt = construire_prompt_lieu_initial(Genre::Horreur, "une vieille malédiction");
+        assert!(prompt.contains("une vieille malédiction"));
+        assert!(prompt.contains(Genre::Horreur.indication_prompt()));
     }
 
     #[test]

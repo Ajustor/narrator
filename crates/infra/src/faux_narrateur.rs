@@ -1,5 +1,5 @@
 use application::ports::narrateur::{ContexteResultat, ContexteTour, ErreurNarrateur, Narrateur, PnjDetecte};
-use domain::{ActionJoueur, EffetObjet, Personnage, PremisseHistoire};
+use domain::{ActionJoueur, EffetObjet, Genre, Personnage, PremisseHistoire};
 
 pub struct FauxNarrateur;
 
@@ -50,6 +50,10 @@ impl Narrateur for FauxNarrateur {
 
     fn detecter_pnj(&mut self, _narration: &str, _noms_connus: &[String]) -> Result<Option<PnjDetecte>, ErreurNarrateur> {
         Ok(None)
+    }
+
+    fn generer_lieu_initial(&mut self, genre: Genre, _premisse_libre: &str) -> Result<String, ErreurNarrateur> {
+        Ok(genre.lieu_initial().to_string())
     }
 
     fn raconter_introduction(

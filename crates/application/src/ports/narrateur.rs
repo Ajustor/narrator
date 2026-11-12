@@ -1,4 +1,4 @@
-use domain::{ActionJoueur, EtatPartie, Personnage, PremisseHistoire};
+use domain::{ActionJoueur, EtatPartie, Genre, Personnage, PremisseHistoire};
 
 #[derive(Debug, Clone)]
 pub struct ContexteTour {
@@ -64,6 +64,12 @@ pub enum ErreurNarrateur {
 ///    before anything mechanical happens (no combat, no dice, nothing to
 ///    report) — it is streamed like `raconter_resultat`, but never takes a
 ///    `ContexteResultat` (there is no resolved action yet to narrate).
+/// 7. `generer_lieu_initial` is only ever called when the player wrote a
+///    free-text premise — `Genre::lieu_initial` already covers the
+///    genre-only case, deterministically, with no model call. It never
+///    inspects or mutates `EtatPartie`; deciding whether the premise is
+///    empty, and falling back to `Genre::lieu_initial` on failure, is
+///    `app_desktop`'s responsibility, not the implementation's.
 pub trait Narrateur: Send {
     /// Proposes an action for the player's free-text input. No narration,
     /// no streaming — this result is never shown to the player directly.
@@ -106,5 +112,16 @@ pub trait Narrateur: Send {
         lieu: &str,
         premisse: &PremisseHistoire,
         sur_fragment: &mut dyn FnMut(&str),
+    ) -> Result<String, ErreurNarrateur>;
+
+    /// Generates a short starting-location phrase consistent with the
+    /// player's freeform premise (and genre) — used only when that
+    /// premise is non-empty, in place of the generic, genre-only
+    /// `Genre::lieu_initial`. Never shown to the player as-is; no
+    /// streaming.
+    fn generer_lieu_initial(
+        &mut self,
+        genre: Genre,
+        premisse_libre: &str,
     ) -> Result<String, ErreurNarrateur>;
 }
