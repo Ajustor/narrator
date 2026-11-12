@@ -53,6 +53,10 @@ pub fn Jeu(
 ) -> Element {
     let mut saisie = use_signal(String::new);
     let mut pnj_deplie: Signal<Option<String>> = use_signal(|| None);
+    // Fermé par défaut : affiché en permanence, ce panneau prenait toute la
+    // largeur disponible sur un écran de téléphone et rendait l'écran de
+    // jeu inutilisable (voir le bouton de bascule dans l'en-tête).
+    let mut panneau_pnj_ouvert = use_signal(|| false);
 
     let mut envoyer = move || {
         if !saisie().trim().is_empty() && !tour_en_cours {
@@ -91,6 +95,13 @@ pub fn Jeu(
                     }
                     span { class: "lieu", "{etat.lieu_actuel}" }
                     span { "PV : {etat.personnage.pv_actuels}/{etat.personnage.pv_max}" }
+                    if !etat.pnj_connus.is_empty() {
+                        button {
+                            class: "bouton-pnj-bascule",
+                            onclick: move |_| panneau_pnj_ouvert.set(!panneau_pnj_ouvert()),
+                            "PNJ ({etat.pnj_connus.len()})"
+                        }
+                    }
                 }
 
                 if let Some(combat) = etat.combat_en_cours.as_ref() {
@@ -153,9 +164,17 @@ pub fn Jeu(
                 }
             }
 
-            if !etat.pnj_connus.is_empty() {
+            if panneau_pnj_ouvert() && !etat.pnj_connus.is_empty() {
+                div { class: "voile-pnj", onclick: move |_| panneau_pnj_ouvert.set(false) }
                 aside { class: "panneau-pnj",
-                    h3 { "PNJ rencontrés" }
+                    div { class: "panneau-pnj-entete",
+                        h3 { "PNJ rencontrés" }
+                        button {
+                            class: "bouton-fermer-pnj",
+                            onclick: move |_| panneau_pnj_ouvert.set(false),
+                            "✕"
+                        }
+                    }
                     for pnj in etat.pnj_connus.iter() {
                         div {
                             key: "{pnj.nom}",

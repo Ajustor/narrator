@@ -332,21 +332,65 @@ html, body {
     opacity: 0.5;
 }
 
+/* Panneau en recouvrement (plutôt qu'une colonne fixe dans le flex de
+   `.ecran-jeu`) : affiché en permanence, il prenait toute la largeur
+   disponible sur un téléphone et rendait l'écran de jeu inutilisable —
+   maintenant ouvert/fermé à la demande via `.bouton-pnj-bascule`. */
 .panneau-pnj {
-    width: 260px;
-    flex-shrink: 0;
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(320px, 85vw);
+    z-index: 21;
     background: var(--bg-panel-alt);
     border-left: 1px solid var(--border);
     padding: 1rem;
     overflow-y: auto;
 }
 
+.voile-pnj {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    z-index: 20;
+}
+
+.panneau-pnj-entete {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.5rem;
+}
+
 .panneau-pnj h3 {
-    margin: 0 0 0.5rem 0;
+    margin: 0;
     color: var(--accent);
     font-size: 0.9rem;
     text-transform: uppercase;
     letter-spacing: 0.05em;
+}
+
+.bouton-fermer-pnj {
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text-dim);
+    font-size: 0.85rem;
+    line-height: 1;
+    padding: 0.2rem 0.5rem;
+    cursor: pointer;
+}
+
+.bouton-pnj-bascule {
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text-dim);
+    font-size: 0.85rem;
+    padding: 0.3rem 0.6rem;
+    cursor: pointer;
+    margin-left: auto;
 }
 
 .pnj {
