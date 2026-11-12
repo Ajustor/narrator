@@ -123,7 +123,11 @@ pub fn construire_prompt_narration(contexte: &ContexteResultat) -> String {
          Ne fais avancer l'histoire que dans la mesure où l'action du joueur l'appelle : si elle \
          est passive ou n'appelle aucune suite (observer, se reposer, discuter sans urgence), \
          reste dans l'instant présent sans introduire de nouvel événement, danger ou personnage \
-         que le joueur n'a pas cherché.",
+         que le joueur n'a pas cherché. \
+         Ne fais jamais parler, décider ou agir le joueur au-delà de ce qu'il a dit ou fait \
+         ci-dessus : ne lui invente ni réplique, ni pensée, ni choix, ni action suivante — \
+         c'est au joueur seul de décider ce qu'il dit ou fait ensuite. Raconte uniquement les \
+         conséquences et les réactions du monde et des autres personnages autour de lui.",
         description_premisse(&contexte.etat),
         description_memoire(&contexte.etat),
         description_pnj_pertinents(&contexte.etat, &contexte.action),
@@ -414,6 +418,22 @@ mod tests {
         };
         let prompt = construire_prompt_narration(&contexte);
         assert!(prompt.contains("avec ma dague, en visant la gorge"));
+    }
+
+    #[test]
+    fn le_prompt_de_narration_interdit_de_faire_parler_ou_decider_pour_le_joueur() {
+        // Rapport utilisateur : « le narrateur prend des décisions pour moi [...]
+        // le narrateur fait dire des choses à mon personnage [...] le joueur
+        // choisit ses actions, le narrateur gère le monde autour ». Rien dans
+        // le prompt ne l'interdisait explicitement — ce test fixe ce garde-fou.
+        let contexte = ContexteResultat {
+            etat: etat_sans_combat(),
+            action: ActionJoueur::ActionLibre { texte: "J'observe".into(), agressif: false },
+            resume_mecanique: vec![],
+            saisie_joueur: "J'observe".to_string(),
+        };
+        let prompt = construire_prompt_narration(&contexte);
+        assert!(prompt.contains("Ne fais jamais parler, décider ou agir le joueur"));
     }
 
     #[test]
