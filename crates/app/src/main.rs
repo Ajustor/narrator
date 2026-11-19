@@ -67,7 +67,17 @@ fn main() {
         print!("> ");
         io::stdout().flush().ok();
         let mut saisie = String::new();
-        io::stdin().read_line(&mut saisie).expect("lecture échouée");
+        // `read_line` renvoie `Ok(0)` (pas une erreur) quand l'entrée
+        // standard est fermée ou arrive à sa fin (ex. entrée redirigée
+        // depuis un fichier) : sans cette vérification, la boucle
+        // recommençait indéfiniment avec une saisie vide à chaque tour,
+        // sans jamais attendre — une boucle infinie à pleine vitesse qui
+        // sature la sortie et la mémoire en quelques secondes.
+        let octets_lus = io::stdin().read_line(&mut saisie).expect("lecture échouée");
+        if octets_lus == 0 {
+            println!("\n(entrée terminée, arrêt.)");
+            break;
+        }
         let saisie = saisie.trim();
 
         // La console n'a pas de dé virtuel à l'écran : le joueur et le

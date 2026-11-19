@@ -15,12 +15,25 @@ pub fn creer_personnage_interactif(de: &mut dyn GenerateurDe) -> Personnage {
     creer_personnage(&nom, &classe, valeurs).expect("construction du personnage échouée")
 }
 
+// `read_line` renvoie `Ok(0)` (pas une erreur) quand l'entrée standard est
+// fermée ou arrive à sa fin : sans cette vérification, ces boucles de
+// relecture tournaient indéfiniment sur une saisie vide dès que l'entrée
+// se terminait (ex. entrée redirigée depuis un fichier), saturant la
+// sortie et la mémoire en quelques secondes.
+fn quitter_si_fin_d_entree(octets_lus: usize) {
+    if octets_lus == 0 {
+        println!("\n(entrée terminée, arrêt.)");
+        std::process::exit(0);
+    }
+}
+
 fn lire_ligne_non_vide(invite: &str) -> String {
     loop {
         print!("{}", invite);
         io::stdout().flush().ok();
         let mut ligne = String::new();
-        io::stdin().read_line(&mut ligne).expect("lecture échouée");
+        let octets_lus = io::stdin().read_line(&mut ligne).expect("lecture échouée");
+        quitter_si_fin_d_entree(octets_lus);
         let ligne = ligne.trim().to_string();
         if !ligne.is_empty() {
             return ligne;
@@ -35,7 +48,8 @@ fn lire_classe() -> String {
         print!("Choisis une classe : ");
         io::stdout().flush().ok();
         let mut ligne = String::new();
-        io::stdin().read_line(&mut ligne).expect("lecture échouée");
+        let octets_lus = io::stdin().read_line(&mut ligne).expect("lecture échouée");
+        quitter_si_fin_d_entree(octets_lus);
         let choix = ligne.trim().to_string();
         if CLASSES_VALIDES.contains(&choix.as_str()) {
             return choix;
@@ -57,7 +71,8 @@ fn lire_caracteristiques(de: &mut dyn GenerateurDe) -> [u32; 6] {
             print!("Valeur pour {} : ", nom);
             io::stdout().flush().ok();
             let mut ligne = String::new();
-            io::stdin().read_line(&mut ligne).expect("lecture échouée");
+            let octets_lus = io::stdin().read_line(&mut ligne).expect("lecture échouée");
+            quitter_si_fin_d_entree(octets_lus);
             match ligne.trim().parse::<u32>() {
                 Ok(valeur) if disponibles.contains(&valeur) => {
                     disponibles.retain(|&v| v != valeur);
