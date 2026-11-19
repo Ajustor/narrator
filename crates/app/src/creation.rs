@@ -75,7 +75,14 @@ fn lire_caracteristiques(de: &mut dyn GenerateurDe) -> [u32; 6] {
             quitter_si_fin_d_entree(octets_lus);
             match ligne.trim().parse::<u32>() {
                 Ok(valeur) if disponibles.contains(&valeur) => {
-                    disponibles.retain(|&v| v != valeur);
+                    // Retire une seule occurrence, pas toutes : un tirage
+                    // avec une valeur en double (`retain` les aurait
+                    // toutes retirées d'un coup) laissait sinon une liste
+                    // de valeurs restantes plus courte que de
+                    // caractéristiques à remplir — la dernière restait
+                    // bloquée sur une liste vide, impossible à satisfaire.
+                    let position = disponibles.iter().position(|&v| v == valeur).unwrap();
+                    disponibles.remove(position);
                     valeurs[i] = valeur;
                     break;
                 }
