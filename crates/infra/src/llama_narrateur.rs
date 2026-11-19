@@ -458,4 +458,44 @@ mod tests {
         eprintln!("action classée : {:?}", action);
         eprintln!("narration ({} caractères) : {}", narration.len(), narration);
     }
+
+    struct DeNonUtilise;
+    impl application::ports::generateur_de::GenerateurDe for DeNonUtilise {
+        fn lancer(&mut self, _de: domain::De, _modificateur: i32) -> domain::JetDe {
+            panic!("aucun dé ne devrait être lancé pour une action d'observation");
+        }
+    }
+
+    // Mesure manuelle de bout en bout, via le vrai `JouerTour::executer`
+    // (donc avec l'heuristique `narration_pourrait_necessiter_une_detection_pnj`
+    // de `application` qui évite l'appel modèle de détection PNJ quand rien
+    // ne le justifie) plutôt qu'en appelant les méthodes du narrateur une
+    // par une — reflète le temps réellement vécu en jeu pour un tour.
+    // NARRATEUR_MODELE=./modeles/Qwen2.5-3B-Instruct-Q4_K_M.gguf \
+    //   cargo test -p infra --release mesure_manuelle_latence_bout_en_bout -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn mesure_manuelle_latence_bout_en_bout() {
+        use super::LlamaNarrateur;
+        use application::usecases::jouer_tour::JouerTour;
+
+        let chemin = std::env::var("NARRATEUR_MODELE").expect("NARRATEUR_MODELE requis pour cette mesure");
+        let mut narrateur = LlamaNarrateur::charger(std::path::Path::new(&chemin)).expect("chargement du modèle");
+        let mut etat = etat_sans_rien();
+        let mut de_joueur = DeNonUtilise;
+        let mut de_monde = DeNonUtilise;
+
+        let debut = std::time::Instant::now();
+        let resultat = JouerTour::executer(
+            &mut etat,
+            "J'observe les alentours",
+            &mut narrateur,
+            &mut de_joueur,
+            &mut de_monde,
+            &mut |_| {},
+        )
+        .unwrap();
+        eprintln!("=== tour complet : {:?} ===", debut.elapsed());
+        eprintln!("narration ({} caractères) : {}", resultat.narration.len(), resultat.narration);
+    }
 }

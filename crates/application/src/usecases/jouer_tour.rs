@@ -396,8 +396,53 @@ fn condenser_si_necessaire(etat: &mut EtatPartie, narrateur: &mut dyn Narrateur)
 // qu'une détection ultérieure en fournit une — voir la vérification
 // `description.is_empty()` ci-dessous — plutôt que de rester vide pour
 // toujours.
+// Mots capitalisés uniquement parce qu'ils ouvrent une phrase en français
+// (articles, pronoms, conjonctions courantes) — pas des candidats à un nom
+// propre. Liste volontairement restreinte aux mots les plus courants :
+// un faux négatif ici (mot absent de la liste) ne coûte qu'un appel modèle
+// inutile, comme avant ce filtre ; un faux positif (mot présent alors que
+// ce serait un vrai nom) retarderait une détection d'un tour au plus,
+// puisque le PNJ reste mentionné aux tours suivants — ce déséquilibre
+// justifie de garder la liste courte plutôt que de viser l'exhaustivité.
+const MOTS_COURANTS_EN_DEBUT_DE_PHRASE: &[&str] = &[
+    "le", "la", "les", "un", "une", "des", "ce", "cet", "cette", "ces", "il", "elle", "ils", "elles", "on", "je",
+    "tu", "nous", "vous", "son", "sa", "ses", "mon", "ma", "mes", "ton", "ta", "tes", "et", "mais", "ou", "donc",
+    "or", "ni", "car", "puis", "alors", "soudain", "enfin", "ainsi", "rien", "tout", "tous", "toute", "toutes",
+    "au", "aux", "du", "de", "en", "dans", "sur", "sous", "vers", "chez", "quand", "lorsque", "après", "avant",
+    "pendant",
+];
+
+/// Heuristique pure, sans appel modèle, pour décider s'il est même utile
+/// d'appeler `detecter_pnj` : vrai si `narration` contient un mot
+/// capitalisé qui n'est ni un mot courant de début de phrase ci-dessus, ni
+/// le nom du joueur — signe probable d'un nom propre (nouveau PNJ, ou PNJ
+/// déjà connu dont l'historique doit s'enrichir : les deux cas appellent
+/// `detecter_pnj`, donc pas besoin de distinguer ici). Avant ce filtre,
+/// cet appel — un aller-retour complet vers le modèle — avait lieu à
+/// chaque tour hors combat, même quand la narration ne mentionnait
+/// manifestement personne (ex. "Il observe la clairière en silence.").
+fn narration_pourrait_necessiter_une_detection_pnj(narration: &str, nom_joueur: &str) -> bool {
+    narration.split_whitespace().any(|mot| {
+        let nettoye: String = mot.chars().filter(|c| c.is_alphabetic()).collect();
+        if nettoye.chars().count() < 2 {
+            return false;
+        }
+        let Some(premiere) = nettoye.chars().next() else { return false };
+        if !premiere.is_uppercase() {
+            return false;
+        }
+        if MOTS_COURANTS_EN_DEBUT_DE_PHRASE.contains(&nettoye.to_lowercase().as_str()) {
+            return false;
+        }
+        !nettoye.eq_ignore_ascii_case(nom_joueur)
+    })
+}
+
 fn enregistrer_pnj_si_pertinent(etat: &mut EtatPartie, narration: &str, narrateur: &mut dyn Narrateur) {
     if !combat_termine(etat) {
+        return;
+    }
+    if !narration_pourrait_necessiter_une_detection_pnj(narration, &etat.personnage.nom) {
         return;
     }
 
@@ -1240,6 +1285,49 @@ mod tests {
         }
     }
 
+    /// Narration sans aucun nom propre plausible (aucun mot capitalisé
+    /// hors mots courants de début de phrase) — sert à prouver que
+    /// `detecter_pnj` n'est pas appelé dans ce cas (voir
+    /// `narration_pourrait_necessiter_une_detection_pnj`) : il panique si
+    /// on l'atteint malgré tout.
+    struct NarrateurSansPnjMentionne;
+
+    impl Narrateur for NarrateurSansPnjMentionne {
+        fn proposer_action(&mut self, _contexte: &ContexteTour) -> Result<ActionJoueur, ErreurNarrateur> {
+            Ok(ActionJoueur::ActionLibre { texte: "j'observe".into(), agressif: false })
+        }
+
+        fn raconter_resultat(
+            &mut self,
+            _contexte: &ContexteResultat,
+            _sur_fragment: &mut dyn FnMut(&str),
+        ) -> Result<String, ErreurNarrateur> {
+            Ok("Il observe la clairière en silence. Rien ne bouge.".to_string())
+        }
+
+        fn condenser_resumes(&mut self, _anciens: &[String]) -> Result<String, ErreurNarrateur> {
+            Ok(String::new())
+        }
+
+        fn detecter_pnj(&mut self, _narration: &str, _noms_connus: &[String]) -> Result<Option<PnjDetecte>, ErreurNarrateur> {
+            panic!("detecter_pnj n'aurait pas dû être appelé : aucun nom propre plausible dans la narration");
+        }
+
+        fn raconter_introduction(
+            &mut self,
+            _personnage: &domain::Personnage,
+            _lieu: &str,
+            _premisse: &domain::PremisseHistoire,
+            _sur_fragment: &mut dyn FnMut(&str),
+        ) -> Result<String, ErreurNarrateur> {
+            Ok(String::new())
+        }
+
+        fn generer_lieu_initial(&mut self, _genre: domain::Genre, _premisse_libre: &str) -> Result<String, ErreurNarrateur> {
+            Ok(String::new())
+        }
+    }
+
     struct NarrateurDetectionPnj {
         resultat: Result<Option<PnjDetecte>, ErreurNarrateur>,
     }
@@ -1564,5 +1652,49 @@ mod tests {
 
         assert!(resultat.is_ok());
         assert!(etat.pnj_connus.is_empty());
+    }
+
+    #[test]
+    fn jouer_tour_n_appelle_pas_detecter_pnj_si_la_narration_ne_nomme_personne() {
+        // Optimisation : éviter un aller-retour modèle complet par tour
+        // quand rien ne le justifie. `NarrateurSansPnjMentionne` panique
+        // si `detecter_pnj` est appelé malgré tout.
+        let mut etat = etat_sans_combat();
+        let mut narrateur = NarrateurSansPnjMentionne;
+        let mut de_joueur = GenerateurDeSeed::nouveau(vec![]);
+        let mut de_monde = GenerateurDeSeed::nouveau(vec![]);
+        JouerTour::executer(&mut etat, "j'observe", &mut narrateur, &mut de_joueur, &mut de_monde, &mut |_| {}).unwrap();
+
+        assert!(etat.pnj_connus.is_empty());
+    }
+
+    #[test]
+    fn narration_sans_nom_propre_ne_necessite_pas_de_detection() {
+        assert!(!narration_pourrait_necessiter_une_detection_pnj(
+            "Il observe la clairière en silence. Rien ne bouge.",
+            "Elowen",
+        ));
+    }
+
+    #[test]
+    fn narration_qui_nomme_un_pnj_necessite_une_detection() {
+        assert!(narration_pourrait_necessiter_une_detection_pnj("Aldric te salue avec un sourire forcé.", "Elowen"));
+    }
+
+    #[test]
+    fn narration_qui_ne_mentionne_que_le_nom_du_joueur_ne_necessite_pas_de_detection() {
+        assert!(!narration_pourrait_necessiter_une_detection_pnj(
+            "Elowen avance prudemment vers la lumière.",
+            "Elowen",
+        ));
+    }
+
+    #[test]
+    fn narration_qui_mentionne_un_pnj_deja_connu_necessite_quand_meme_une_detection() {
+        // Même un PNJ déjà connu doit repasser par `detecter_pnj` : c'est
+        // ce qui alimente son historique à chaque nouvelle rencontre (voir
+        // `jouer_tour_ajoute_a_l_historique_d_une_fiche_pnj_existante`) —
+        // l'heuristique ne doit donc pas se limiter aux noms inconnus.
+        assert!(narration_pourrait_necessiter_une_detection_pnj("Aldric te reconnaît aussitôt.", "Elowen"));
     }
 }
