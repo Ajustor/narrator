@@ -17,14 +17,20 @@ use std::path::Path;
 
 const TAILLE_CONTEXTE: u32 = 4096;
 const TOKENS_MAX_CLASSIFICATION: i32 = 100;
-// Un modèle léger (ex. Qwen2.5-1.5B) est moins concis qu'un modèle plus
-// costaud pour la même consigne ("deux ou trois phrases") et atteint donc
-// ce plafond plus souvent, coupant sa dernière phrase en plein milieu —
-// signalé en jeu. Relevé de 200 à 300 pour que ça arrive moins souvent ;
-// `tronquer_phrase_incomplete` reste le filet de sécurité qui garantit
-// qu'on n'affiche jamais une phrase visiblement inachevée, quel que soit
-// ce plafond.
-const TOKENS_MAX_NARRATION: i32 = 300;
+// La génération d'un tour (classification + narration + détection PNJ)
+// mesurée en conditions réelles (Qwen2.5-3B-Instruct, CPU de bureau) : la
+// narration à elle seule y passait ~11 s pour 2-3 phrases, l'essentiel du
+// temps d'un tour — voir `construire_prompt_narration` dans `prompts.rs`,
+// resserré à "une ou deux phrases courtes" pour réduire d'autant la
+// génération (et accessoirement la longueur affichée au joueur). Ce
+// plafond baisse en proportion (300 → 180) mais garde une marge
+// généreuse au-delà de 1-2 phrases : un modèle plus léger (ex.
+// Qwen2.5-1.5B) suit moins bien la consigne de longueur que ce modèle et
+// a besoin de cette marge pour ne pas couper sa dernière phrase en plein
+// milieu — `tronquer_phrase_incomplete` reste le filet de sécurité qui
+// garantit qu'on n'affiche jamais une phrase visiblement inachevée, quel
+// que soit ce plafond.
+const TOKENS_MAX_NARRATION: i32 = 180;
 const TOKENS_MAX_CONDENSATION: i32 = 150;
 const TOKENS_MAX_DETECTION_PNJ: i32 = 100;
 const TOKENS_MAX_LIEU_INITIAL: i32 = 40;
@@ -414,5 +420,42 @@ mod tests {
         // panique (slice index not on char boundary).
         let texte = "Elle hésite…";
         assert_eq!(tronquer_phrase_incomplete(texte), texte);
+    }
+
+    // Mesure manuelle, jamais exécutée en CI (`#[ignore]`) : charge le
+    // vrai modèle (NARRATEUR_MODELE) et enchaîne les appels d'un tour
+    // normal pour voir où le temps part réellement, plutôt que de
+    // deviner — voir les `eprintln!("[timing] ...")` temporaires dans
+    // `generer`. Lancer avec :
+    // NARRATEUR_MODELE=./modeles/Qwen2.5-3B-Instruct-Q4_K_M.gguf \
+    //   cargo test -p infra --release mesure_manuelle_latence_un_tour -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn mesure_manuelle_latence_un_tour() {
+        use super::LlamaNarrateur;
+        use application::ports::narrateur::{ContexteResultat, ContexteTour, Narrateur};
+
+        let chemin = std::env::var("NARRATEUR_MODELE").expect("NARRATEUR_MODELE requis pour cette mesure");
+        let mut narrateur = LlamaNarrateur::charger(std::path::Path::new(&chemin)).expect("chargement du modèle");
+
+        let etat = etat_sans_rien();
+        let contexte_tour = ContexteTour { etat: etat.clone(), saisie_joueur: "J'observe les alentours".into() };
+
+        eprintln!("=== proposer_action ===");
+        let action = narrateur.proposer_action(&contexte_tour).unwrap();
+
+        let contexte_resultat = ContexteResultat {
+            etat,
+            action: action.clone(),
+            resume_mecanique: vec![],
+            saisie_joueur: "J'observe les alentours".into(),
+        };
+        eprintln!("=== raconter_resultat ===");
+        let narration = narrateur.raconter_resultat(&contexte_resultat, &mut |_| {}).unwrap();
+        eprintln!("=== detecter_pnj ===");
+        let _ = narrateur.detecter_pnj(&narration, &[]).unwrap();
+
+        eprintln!("action classée : {:?}", action);
+        eprintln!("narration ({} caractères) : {}", narration.len(), narration);
     }
 }

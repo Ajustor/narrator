@@ -136,7 +136,7 @@ pub fn construire_prompt_narration(contexte: &ContexteResultat) -> String {
          Voici ce qui s'est réellement passé : {}\n\
          {}\
          Raconte cette scène de façon vivante et dramatique, en français, \
-         en deux ou trois phrases, en reprenant les détails précis de la phrase du joueur \
+         en une ou deux phrases courtes, en reprenant les détails précis de la phrase du joueur \
          ci-dessus (arme, manière, formulation) plutôt qu'une version générique, sans jamais \
          contredire ces faits ni inventer d'autres chiffres. \
          Ne fais avancer l'histoire que dans la mesure où l'action du joueur l'appelle : si elle \
