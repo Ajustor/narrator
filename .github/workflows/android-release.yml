@@ -126,7 +126,7 @@ jobs:
           APK=target/dx/Narrator/release/android/app/app/build/outputs/apk/release/app-release.apk
           VERSION=$(git rev-parse --short HEAD)
           TAILLE_OCTETS=$(stat -c%s "$APK")
-          TAILLE_AFFICHEE=$(numfmt --to=iec --suffix=o --format="%.1f" "$TAILLE_OCTETS")
+          TAILLE_AFFICHEE=$(numfmt --to=iec-i --suffix=o --format="%.1f" "$TAILLE_OCTETS")
           DATE_AFFICHEE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
           mkdir -p public
