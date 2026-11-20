@@ -117,7 +117,7 @@ fn chemin_apk_mise_a_jour() -> PathBuf {
 /// jamais signalée comme code mort sur un build desktop.
 #[cfg(feature = "plateforme-android")]
 fn verifier_mise_a_jour_au_demarrage() -> Option<crate::mise_a_jour::InfoMiseAJour> {
-    crate::mise_a_jour::verifier_disponibilite(crate::mise_a_jour::ADRESSE_MAJ_PAR_DEFAUT)
+    crate::mise_a_jour::verifier_disponibilite(crate::mise_a_jour::BASE_MAJ_PAR_DEFAUT)
 }
 
 #[cfg(feature = "plateforme-desktop")]

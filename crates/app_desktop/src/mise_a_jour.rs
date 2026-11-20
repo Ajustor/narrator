@@ -6,11 +6,13 @@ use serde::Deserialize;
 /// sur `"inconnu"` si `git` est indisponible).
 pub const VERSION_ACTUELLE: &str = env!("NARRATEUR_GIT_HASH");
 
-/// Adresse par défaut du serveur de développement local servant
-/// `version.json` et l'APK à jour sur le réseau local (LAN).
-pub const ADRESSE_MAJ_PAR_DEFAUT: &str = "192.168.1.48:8000";
+/// URL de base (avec son schéma) où la pipeline CI (`.github/workflows/`)
+/// publie `version.json` et l'APK à jour, sur GitHub Pages — remplace
+/// l'ancien serveur de développement local sur le réseau LAN, qui n'était
+/// qu'un palliatif en l'absence de serveur de mise à jour permanent.
+pub const BASE_MAJ_PAR_DEFAUT: &str = "https://ajustor.github.io/narrator";
 
-/// Information de mise à jour renvoyée par le serveur LAN lorsqu'une
+/// Information de mise à jour renvoyée par `BASE_MAJ_PAR_DEFAUT` lorsqu'une
 /// version différente de `VERSION_ACTUELLE` est disponible.
 #[derive(Debug, Clone, PartialEq)]
 pub struct InfoMiseAJour {
@@ -27,22 +29,23 @@ struct ReponseVersion {
 /// Délai maximal d'établissement de connexion et d'attente de données.
 /// Plus court que celui de `telechargement.rs` (30s) : cette vérification
 /// se fait silencieusement à chaque lancement, elle doit donc échouer vite
-/// si le serveur LAN n'est pas joignable plutôt que de retarder le
-/// démarrage de l'application.
+/// si le site est injoignable (pas de réseau, GitHub Pages indisponible...)
+/// plutôt que de retarder le démarrage de l'application.
 const DELAI_RESEAU: std::time::Duration = std::time::Duration::from_secs(3);
 
-/// Interroge `adresse` (hôte:port) pour savoir si une version plus récente
-/// de l'application est disponible. Retourne `None` sur toute erreur
-/// (réseau, JSON invalide, champ manquant) aussi bien que lorsque la
+/// Interroge `base_url` (URL complète, avec son schéma, ex.
+/// `https://ajustor.github.io/narrator`) pour savoir si une version plus
+/// récente de l'application est disponible. Retourne `None` sur toute
+/// erreur (réseau, JSON invalide, champ manquant) aussi bien que lorsque la
 /// version annoncée est identique à `VERSION_ACTUELLE` — ce n'est jamais
 /// une erreur fatale, seulement l'absence de mise à jour à proposer.
-pub fn verifier_disponibilite(adresse: &str) -> Option<InfoMiseAJour> {
+pub fn verifier_disponibilite(base_url: &str) -> Option<InfoMiseAJour> {
     let agent = ureq::AgentBuilder::new()
         .timeout_connect(DELAI_RESEAU)
         .timeout_read(DELAI_RESEAU)
         .build();
     let reponse = agent
-        .get(&format!("http://{adresse}/version.json"))
+        .get(&format!("{base_url}/version.json"))
         .call()
         .ok()?;
     let corps = reponse.into_string().ok()?;
@@ -294,8 +297,8 @@ mod tests {
         let (url, fil) = servir_version_une_fois(&format!(
             r#"{{"version":"autre-version","url":"http://exemple/narrateur.apk"}}"#
         ));
-        let adresse = url.strip_prefix("http://").unwrap().trim_end_matches("/version.json");
-        let resultat = verifier_disponibilite(adresse);
+        let base_url = url.trim_end_matches("/version.json");
+        let resultat = verifier_disponibilite(base_url);
         fil.join().expect("fil serveur");
         assert_eq!(resultat, Some(InfoMiseAJour {
             version: "autre-version".into(),
@@ -307,8 +310,8 @@ mod tests {
     fn verifier_disponibilite_retourne_none_si_la_version_est_identique() {
         let corps = format!(r#"{{"version":"{VERSION_ACTUELLE}","url":"http://exemple/narrateur.apk"}}"#);
         let (url, fil) = servir_version_une_fois(&corps);
-        let adresse = url.strip_prefix("http://").unwrap().trim_end_matches("/version.json");
-        let resultat = verifier_disponibilite(adresse);
+        let base_url = url.trim_end_matches("/version.json");
+        let resultat = verifier_disponibilite(base_url);
         fil.join().expect("fil serveur");
         assert_eq!(resultat, None);
     }
@@ -316,8 +319,8 @@ mod tests {
     #[test]
     fn verifier_disponibilite_retourne_none_si_json_invalide() {
         let (url, fil) = servir_version_une_fois("ceci n'est pas du json");
-        let adresse = url.strip_prefix("http://").unwrap().trim_end_matches("/version.json");
-        let resultat = verifier_disponibilite(adresse);
+        let base_url = url.trim_end_matches("/version.json");
+        let resultat = verifier_disponibilite(base_url);
         fil.join().expect("fil serveur");
         assert_eq!(resultat, None);
     }
@@ -327,8 +330,13 @@ mod tests {
         // Un port lié puis immédiatement fermé : connexion refusée garantie,
         // sans dépendre d'un vrai hôte distant injoignable.
         let ecouteur = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let adresse = ecouteur.local_addr().unwrap().to_string();
+        let base_url = format!("http://{}", ecouteur.local_addr().unwrap());
         drop(ecouteur);
-        assert_eq!(verifier_disponibilite(&adresse), None);
+        assert_eq!(verifier_disponibilite(&base_url), None);
+    }
+
+    #[test]
+    fn base_maj_par_defaut_est_une_url_https() {
+        assert!(BASE_MAJ_PAR_DEFAUT.starts_with("https://"));
     }
 }

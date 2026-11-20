@@ -1,0 +1,143 @@
+name: Android release
+
+# Construit l'APK de release, la signe avec la clé dédiée du projet (voir
+# scripts/patch_signing_android.sh et les secrets ANDROID_*) et publie le
+# site de téléchargement (site/index.html + l'APK + version.json) sur
+# GitHub Pages — remplace le serveur de développement local sur le réseau
+# LAN, qui n'était qu'un palliatif en l'absence de serveur permanent.
+#
+# Secrets requis sur le dépôt (jamais commités) :
+#   ANDROID_KEYSTORE_BASE64   keystore de release, encodé en base64
+#   ANDROID_KEYSTORE_PASSWORD mot de passe du keystore
+#   ANDROID_KEY_ALIAS         alias de la clé dans le keystore
+#   ANDROID_KEY_PASSWORD      mot de passe de la clé
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+env:
+  NDK_VERSION: "29.0.14206865"
+  BUILD_TOOLS_VERSION: "36.1.0"
+  PLATFORM_VERSION: "android-34"
+  DX_VERSION: "0.7.9"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Installer Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Installer la toolchain Rust
+        uses: dtolnay/rust-toolchain@1.93.0
+        with:
+          targets: aarch64-linux-android
+
+      - name: Mettre en cache le registre et les artefacts Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: android-release
+
+      - name: Installer le NDK et les build-tools Android
+        run: |
+          yes | sdkmanager --licenses >/dev/null
+          sdkmanager --install \
+            "ndk;${NDK_VERSION}" \
+            "build-tools;${BUILD_TOOLS_VERSION}" \
+            "platforms;${PLATFORM_VERSION}"
+
+      - name: Installer les dépendances système (ImageMagick, cmake, libclang)
+        # cmake et libclang sont requis par llama-cpp-sys-2 (cmake pour
+        # compiler llama.cpp, libclang par bindgen pour générer les
+        # liaisons Rust) — jamais garanti présent sur l'image du runner.
+        run: sudo apt-get update && sudo apt-get install -y imagemagick cmake libclang-dev clang
+
+      - name: Installer dx (dioxus-cli)
+        run: cargo install dioxus-cli --version "${DX_VERSION}" --locked
+
+      - name: Lancer la suite de tests
+        run: cargo test --workspace --no-default-features --features plateforme-desktop,document
+
+      - name: Construire le bundle Android (release)
+        run: |
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/$NDK_VERSION"
+          dx bundle --platform android --package-types apk --package app_desktop \
+            --target aarch64-linux-android --release \
+            --no-default-features --features plateforme-android,document
+
+      - name: Patcher l'icône, le manifeste et la signature
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/narrateur-release.keystore
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$ANDROID_KEYSTORE_PATH"
+          ANDROID_PROJECT=target/dx/Narrator/release/android/app
+          ./scripts/patch_icone_android.sh "$ANDROID_PROJECT"
+          ./scripts/patch_manifest_maj_android.sh "$ANDROID_PROJECT"
+          ./scripts/patch_signing_android.sh "$ANDROID_PROJECT"
+
+      - name: Construire l'APK signé
+        run: |
+          cd target/dx/Narrator/release/android/app
+          ./gradlew assembleRelease --no-daemon
+
+      - name: Vérifier la signature de l'APK
+        run: |
+          APK=target/dx/Narrator/release/android/app/app/build/outputs/apk/release/app-release.apk
+          APKSIGNER="$ANDROID_HOME/build-tools/${BUILD_TOOLS_VERSION}/apksigner"
+          "$APKSIGNER" verify --print-certs "$APK"
+
+      - name: Préparer le site de téléchargement
+        run: |
+          APK=target/dx/Narrator/release/android/app/app/build/outputs/apk/release/app-release.apk
+          VERSION=$(git rev-parse --short HEAD)
+          TAILLE_OCTETS=$(stat -c%s "$APK")
+          TAILLE_AFFICHEE=$(numfmt --to=iec --suffix=o --format="%.1f" "$TAILLE_OCTETS")
+          DATE_AFFICHEE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+          mkdir -p public
+          cp "$APK" public/narrateur.apk
+          printf '{"version": "%s", "url": "%s"}\n' \
+            "$VERSION" "https://ajustor.github.io/narrator/narrateur.apk" > public/version.json
+
+          sed \
+            -e "s/__VERSION__/$VERSION/g" \
+            -e "s/__TAILLE__/$TAILLE_AFFICHEE/g" \
+            -e "s/__DATE__/$DATE_AFFICHEE/g" \
+            site/index.html > public/index.html
+
+      - name: Mettre en page l'artefact Pages
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Déployer sur GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Narrateur — vivez votre histoire</title>
+<style>
+:root {
+  --ink: #1b1510;
+  --paper: #f4ede0;
+  --paper-dim: #e7dcc7;
+  --rule: #cdbd9c;
+  --gold: #a9792f;
+  --gold-deep: #7c5a22;
+  --body-font: "Source Serif 4", Georgia, "Times New Roman", serif;
+  --display-font: "Cormorant", Georgia, serif;
+  --mono-font: "JetBrains Mono", ui-monospace, "SF Mono", Consolas, monospace;
+  color-scheme: light;
+  background: var(--paper);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: #ece3d2;
+    --paper: #15110c;
+    --paper-dim: #1f1a12;
+    --rule: #3a311f;
+    --gold: #d9a94a;
+    --gold-deep: #e8bd6a;
+    color-scheme: dark;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--body-font);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 48px;
+  display: flex;
+  justify-content: center;
+}
+
+main {
+  width: 100%;
+  max-width: 560px;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+}
+
+.cover {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  text-align: center;
+  padding-block: 28px 8px;
+}
+
+.sigil {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  border: 2px solid var(--gold);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--display-font);
+  font-size: 30px;
+  font-weight: 600;
+  color: var(--gold);
+}
+
+.cover h1 {
+  font-family: var(--display-font);
+  font-weight: 600;
+  font-size: clamp(2.4rem, 8vw, 3.2rem);
+  letter-spacing: 0.01em;
+  margin: 0;
+  text-wrap: balance;
+}
+
+.cover p {
+  margin: 0;
+  color: var(--gold-deep);
+  font-size: 0.95rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-family: var(--body-font);
+}
+
+.rule {
+  height: 1px;
+  background: var(--rule);
+  border: none;
+  margin: 0;
+}
+
+.card {
+  background: var(--paper-dim);
+  border: 1px solid var(--rule);
+  border-radius: 10px;
+  padding: 24px clamp(18px, 5vw, 28px);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px 16px;
+  font-size: 0.95rem;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.facts dt {
+  color: var(--gold-deep);
+  font-weight: 600;
+}
+
+.facts dd {
+  margin: 0;
+  font-family: var(--mono-font);
+  font-variant-numeric: tabular-nums;
+}
+
+.download {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding-block: 4px;
+}
+
+.download a.button {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--gold);
+  color: var(--paper);
+  font-family: var(--body-font);
+  font-weight: 600;
+  font-size: 1.05rem;
+  text-decoration: none;
+  padding: 14px 28px;
+  border-radius: 8px;
+  transition: filter 0.15s ease;
+}
+
+.download a.button:hover,
+.download a.button:focus-visible {
+  filter: brightness(1.08);
+  outline: 2px solid var(--gold-deep);
+  outline-offset: 2px;
+}
+
+.download a.button:active {
+  filter: brightness(0.94);
+}
+
+.download .size {
+  font-family: var(--mono-font);
+  font-size: 0.85rem;
+  color: var(--gold-deep);
+  font-variant-numeric: tabular-nums;
+}
+
+h2 {
+  font-family: var(--display-font);
+  font-weight: 600;
+  font-size: 1.4rem;
+  margin: 0;
+  text-wrap: balance;
+}
+
+ol.steps {
+  margin: 0;
+  padding-left: 1.4em;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  line-height: 1.55;
+}
+
+ol.steps li::marker {
+  color: var(--gold);
+  font-family: var(--mono-font);
+  font-weight: 600;
+}
+
+.note {
+  font-size: 0.85rem;
+  color: var(--ink);
+  opacity: 0.75;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.note a {
+  color: var(--gold-deep);
+}
+
+code {
+  font-family: var(--mono-font);
+  font-size: 0.9em;
+  background: var(--rule);
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+}
+
+footer {
+  text-align: center;
+  font-size: 0.8rem;
+  opacity: 0.6;
+}
+
+footer a {
+  color: inherit;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .download a.button { transition: none; }
+}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant:wght@600;700&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@500&display=swap">
+</head>
+<body>
+<main>
+  <div class="cover">
+    <div class="sigil">N</div>
+    <h1>Narrateur</h1>
+    <p>Vivez votre histoire — édition Android</p>
+  </div>
+
+  <hr class="rule">
+
+  <div class="card">
+    <dl class="facts">
+      <dt>Version</dt>
+      <dd>__VERSION__</dd>
+      <dt>Taille</dt>
+      <dd>__TAILLE__</dd>
+      <dt>Mis à jour</dt>
+      <dd>__DATE__</dd>
+      <dt>Android requis</dt>
+      <dd>7.0 ou plus (API 24+)</dd>
+      <dt>Architecture</dt>
+      <dd>arm64-v8a</dd>
+      <dt>Paquet</dt>
+      <dd>com.alexandregambier.narrateur</dd>
+    </dl>
+
+    <div class="download">
+      <a class="button" href="narrateur.apk">Télécharger narrateur.apk</a>
+      <span class="size">__TAILLE__ — installation manuelle (APK hors Play Store)</span>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Installer sur ton téléphone</h2>
+    <ol class="steps">
+      <li>Ouvre cette page dans le navigateur de ton téléphone et télécharge le fichier <code>.apk</code> ci-dessus.</li>
+      <li>Ouvre le fichier téléchargé. Android demande l'autorisation d'installer des applications venant d'une source inconnue — accepte-la pour cette installation.</li>
+      <li>Appuie sur « Installer », puis lance Narrateur depuis l'écran d'accueil.</li>
+      <li>Au premier lancement, l'application télécharge le modèle de langage qui sert de maître du jeu (de ~1 à ~5 Gio selon le modèle choisi) — reste connecté au Wi-Fi jusqu'à la fin.</li>
+    </ol>
+    <p class="note">
+      Une mise à jour ultérieure se réinstalle par-dessus sans perdre ta partie en cours : l'application vérifie
+      elle-même, à chaque lancement, si une version plus récente est publiée ici, et propose de l'installer.
+    </p>
+  </div>
+
+  <footer>
+    Code source sur <a href="https://github.com/Ajustor/narrator">github.com/Ajustor/narrator</a>
+  </footer>
+</main>
+</body>
+</html>
