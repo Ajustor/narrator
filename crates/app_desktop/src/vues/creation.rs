@@ -1,6 +1,6 @@
 use application::usecases::creer_personnage::CLASSES_VALIDES;
 use dioxus::prelude::*;
-use domain::Genre;
+use domain::{Genre, Pronom};
 
 use crate::modeles::PaletteModele;
 use crate::protocole::MessageVersWorker;
@@ -24,6 +24,7 @@ pub fn Creation(
     let mut origines = use_signal(|| [None::<usize>; 6]);
     let mut palette = use_signal(|| PaletteModele::Equilibre);
     let mut genre = use_signal(Genre::default);
+    let mut pronom = use_signal(Pronom::default);
     let mut premisse_libre = use_signal(String::new);
 
     // Les origines (indices dans `valeurs_proposees`) encore disponibles
@@ -81,6 +82,20 @@ pub fn Creation(
                     }
                 }
                 div { class: "champ",
+                    label { "Pronom : " }
+                    select {
+                        value: "{pronom().nom_affiche()}",
+                        onchange: move |evt| {
+                            if let Some(p) = Pronom::TOUTES.iter().find(|p| p.nom_affiche() == evt.value()) {
+                                pronom.set(*p);
+                            }
+                        },
+                        for p in Pronom::TOUTES.iter() {
+                            option { key: "{p.nom_affiche()}", value: "{p.nom_affiche()}", "{p.nom_affiche()}" }
+                        }
+                    }
+                }
+                div { class: "champ",
                     label { "Modèle : " }
                     select {
                         value: "{palette().nom_affiche()}",
@@ -93,12 +108,15 @@ pub fn Creation(
                             option {
                                 key: "{p.nom_affiche()}",
                                 value: "{p.nom_affiche()}",
-                                "{p.nom_affiche()} (~{crate::telechargement::formater_taille_go(p.taille_approx_octets())})"
+                                "{p.nom_affiche()} (~{crate::telechargement::formater_taille_go(p.taille_approx_octets())}, {p.temps_reponse_estime()})"
                             }
                         }
                     }
                     if let Some(avertissement) = palette().avertissement() {
                         p { class: "avertissement", "{avertissement}" }
+                    }
+                    p { class: "texte-discret",
+                        "Temps mesurés sur ordinateur ; compte sur plus lent sur mobile."
                     }
                 }
                 div { class: "champ",
@@ -154,6 +172,7 @@ pub fn Creation(
                             valeurs,
                             palette_modele: palette(),
                             genre: genre(),
+                            pronom: pronom(),
                             premisse_libre: premisse_libre(),
                         });
                     },

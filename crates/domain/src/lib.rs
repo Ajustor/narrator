@@ -9,6 +9,7 @@ mod genre;
 mod objet;
 mod personnage;
 mod premisse;
+mod pronom;
 mod transcript;
 
 pub use action_joueur::ActionJoueur;
@@ -22,4 +23,5 @@ pub use genre::Genre;
 pub use objet::{EffetObjet, Objet};
 pub use personnage::Personnage;
 pub use premisse::PremisseHistoire;
+pub use pronom::Pronom;
 pub use transcript::LigneTranscript;

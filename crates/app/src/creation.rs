@@ -2,7 +2,7 @@ use application::ports::generateur_de::GenerateurDe;
 use application::usecases::creer_personnage::{
     creer_personnage, tirer_valeurs_caracteristiques, CLASSES_VALIDES,
 };
-use domain::Personnage;
+use domain::{Personnage, Pronom};
 use std::io::{self, Write};
 
 pub fn creer_personnage_interactif(de: &mut dyn GenerateurDe) -> Personnage {
@@ -10,9 +10,10 @@ pub fn creer_personnage_interactif(de: &mut dyn GenerateurDe) -> Personnage {
 
     let nom = lire_ligne_non_vide("Nom de ton personnage : ");
     let classe = lire_classe();
+    let pronom = lire_pronom();
     let valeurs = lire_caracteristiques(de);
 
-    creer_personnage(&nom, &classe, valeurs).expect("construction du personnage échouée")
+    creer_personnage(&nom, &classe, valeurs, pronom).expect("construction du personnage échouée")
 }
 
 // `read_line` renvoie `Ok(0)` (pas une erreur) quand l'entrée standard est
@@ -55,6 +56,21 @@ fn lire_classe() -> String {
             return choix;
         }
         println!("Classe invalide.");
+    }
+}
+
+fn lire_pronom() -> Pronom {
+    loop {
+        print!("Pronom (il/elle) : ");
+        io::stdout().flush().ok();
+        let mut ligne = String::new();
+        let octets_lus = io::stdin().read_line(&mut ligne).expect("lecture échouée");
+        quitter_si_fin_d_entree(octets_lus);
+        match ligne.trim().to_lowercase().as_str() {
+            "il" => return Pronom::Masculin,
+            "elle" => return Pronom::Feminin,
+            _ => println!("Réponds par \"il\" ou \"elle\"."),
+        }
     }
 }
 

@@ -6,7 +6,7 @@ use application::usecases::creer_personnage::{
 };
 use application::usecases::jouer_tour::JouerTour;
 use application::usecases::partie::{charger_partie, sauvegarder_partie};
-use domain::{De, EtatPartie, Genre, JetDe};
+use domain::{De, EtatPartie, Genre, JetDe, Pronom};
 use std::path::{Path, PathBuf};
 
 use crate::histoires::{self, InfoHistoire};
@@ -188,9 +188,10 @@ pub fn creer_nouvelle_histoire(
     classe: &str,
     valeurs: [u32; 6],
     genre: Genre,
+    pronom: Pronom,
     premisse_libre: String,
 ) -> Result<EtatPartie, ErreurCreationPersonnage> {
-    let personnage = creer_personnage(nom, classe, valeurs)?;
+    let personnage = creer_personnage(nom, classe, valeurs, pronom)?;
     Ok(EtatPartie {
         personnage,
         lieu_actuel: genre.lieu_initial().to_string(),
@@ -502,8 +503,8 @@ pub fn lancer(
                     let _ = tx.unbounded_send(MessageVersUi::ValeursProposees(valeurs));
                     continue;
                 }
-                Ok(MessageVersWorker::CreerPersonnage { nom, classe, valeurs, palette_modele, genre, premisse_libre }) => {
-                    let Ok(etat) = creer_nouvelle_histoire(&nom, &classe, valeurs, genre, premisse_libre) else {
+                Ok(MessageVersWorker::CreerPersonnage { nom, classe, valeurs, palette_modele, genre, pronom, premisse_libre }) => {
+                    let Ok(etat) = creer_nouvelle_histoire(&nom, &classe, valeurs, genre, pronom, premisse_libre) else {
                         continue; // formulaire invalide : ne devrait pas arriver, la Création valide déjà
                     };
                     let nouvel_id = histoires::generer_id(&nom);
@@ -762,7 +763,7 @@ mod tests {
     fn creer_nouvelle_histoire_construit_un_personnage_sans_combat_force() {
         let etat = creer_nouvelle_histoire(
             "Elowen", "Guerrier", [15, 14, 13, 12, 10, 8],
-            Genre::default(), String::new(),
+            Genre::default(), Pronom::default(), String::new(),
         ).unwrap();
         assert_eq!(etat.personnage.nom, "Elowen");
         // Pas de combat forcé dès la création : un combat ne démarre que
@@ -775,7 +776,7 @@ mod tests {
     fn creer_nouvelle_histoire_porte_le_genre_et_la_premisse_choisis() {
         let etat = creer_nouvelle_histoire(
             "Elowen", "Guerrier", [15, 14, 13, 12, 10, 8],
-            Genre::Horreur, "une vieille malédiction".into(),
+            Genre::Horreur, Pronom::default(), "une vieille malédiction".into(),
         ).unwrap();
         assert_eq!(etat.premisse.genre, Genre::Horreur);
         assert_eq!(etat.premisse.description, "une vieille malédiction");
@@ -785,7 +786,7 @@ mod tests {
     fn creer_nouvelle_histoire_demarre_dans_un_lieu_coherent_avec_le_genre() {
         let etat = creer_nouvelle_histoire(
             "Elowen", "Guerrier", [15, 14, 13, 12, 10, 8],
-            Genre::ScienceFiction, String::new(),
+            Genre::ScienceFiction, Pronom::default(), String::new(),
         ).unwrap();
         assert_eq!(etat.lieu_actuel, Genre::ScienceFiction.lieu_initial());
         assert_ne!(etat.lieu_actuel, "Clairière");

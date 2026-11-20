@@ -48,6 +48,19 @@ impl PaletteModele {
         }
     }
 
+    /// Temps de réponse estimé pour un tour complet (classification +
+    /// narration), mesuré en conditions réelles sur un CPU de bureau — sur
+    /// mobile, attends-toi à plus lent. Affiché dans le choix de modèle à
+    /// la création pour que le joueur voie le compromis vitesse/qualité
+    /// avant de choisir, plutôt que de le découvrir en jouant.
+    pub fn temps_reponse_estime(&self) -> &'static str {
+        match self {
+            PaletteModele::Leger => "~10 s par réponse",
+            PaletteModele::Equilibre => "~17 s par réponse",
+            PaletteModele::Costaud => "~35 s par réponse",
+        }
+    }
+
     pub fn chemin_dans(&self, repertoire_modeles: &std::path::Path) -> std::path::PathBuf {
         repertoire_modeles.join(self.nom_fichier())
     }
@@ -70,6 +83,13 @@ mod tests {
             assert!(palette.url().starts_with("https://huggingface.co/"));
             assert!(palette.nom_fichier().ends_with(".gguf"));
             assert!(palette.url().ends_with(palette.nom_fichier()));
+        }
+    }
+
+    #[test]
+    fn chaque_palette_a_un_temps_de_reponse_estime_non_vide() {
+        for palette in PaletteModele::TOUTES {
+            assert!(!palette.temps_reponse_estime().is_empty());
         }
     }
 

@@ -1,4 +1,4 @@
-use domain::{EtatPartie, Genre, LigneTranscript, Vainqueur};
+use domain::{EtatPartie, Genre, LigneTranscript, Pronom, Vainqueur};
 
 pub use crate::histoires::InfoHistoire;
 pub use crate::modeles::PaletteModele;
@@ -39,6 +39,7 @@ pub enum MessageVersWorker {
         valeurs: [u32; 6],
         palette_modele: PaletteModele,
         genre: Genre,
+        pronom: Pronom,
         premisse_libre: String,
     },
     JouerTour(String),

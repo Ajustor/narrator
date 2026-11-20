@@ -1,5 +1,5 @@
 use crate::ports::generateur_de::GenerateurDe;
-use domain::{Caracteristiques, De, Objet, Personnage};
+use domain::{Caracteristiques, De, Objet, Personnage, Pronom};
 
 pub const CLASSES_VALIDES: [&str; 3] = ["Guerrier", "Mage", "Voleur"];
 
@@ -36,6 +36,7 @@ pub fn creer_personnage(
     nom: &str,
     classe: &str,
     valeurs: [u32; 6],
+    pronom: Pronom,
 ) -> Result<Personnage, ErreurCreationPersonnage> {
     if nom.trim().is_empty() {
         return Err(ErreurCreationPersonnage::NomVide);
@@ -63,7 +64,8 @@ pub fn creer_personnage(
         classe.to_string(),
         caracteristiques,
         inventaire,
-    ))
+    )
+    .avec_pronom(pronom))
 }
 
 #[cfg(test)]
@@ -75,36 +77,37 @@ mod tests {
 
     #[test]
     fn nom_vide_est_rejete() {
-        let resultat = creer_personnage("  ", "Guerrier", VALEURS_VALIDES);
+        let resultat = creer_personnage("  ", "Guerrier", VALEURS_VALIDES, Pronom::Masculin);
         assert_eq!(resultat, Err(ErreurCreationPersonnage::NomVide));
     }
 
     #[test]
     fn classe_invalide_est_rejetee() {
-        let resultat = creer_personnage("Elowen", "Barde", VALEURS_VALIDES);
+        let resultat = creer_personnage("Elowen", "Barde", VALEURS_VALIDES, Pronom::Masculin);
         assert_eq!(resultat, Err(ErreurCreationPersonnage::ClasseInvalide));
     }
 
     #[test]
     fn valeur_sous_le_minimum_est_rejetee() {
-        let resultat = creer_personnage("Elowen", "Guerrier", [2, 14, 13, 12, 10, 8]);
+        let resultat = creer_personnage("Elowen", "Guerrier", [2, 14, 13, 12, 10, 8], Pronom::Masculin);
         assert_eq!(resultat, Err(ErreurCreationPersonnage::ValeursCaracteristiquesInvalides));
     }
 
     #[test]
     fn valeur_au_dessus_du_maximum_est_rejetee() {
-        let resultat = creer_personnage("Elowen", "Guerrier", [19, 14, 13, 12, 10, 8]);
+        let resultat = creer_personnage("Elowen", "Guerrier", [19, 14, 13, 12, 10, 8], Pronom::Masculin);
         assert_eq!(resultat, Err(ErreurCreationPersonnage::ValeursCaracteristiquesInvalides));
     }
 
     #[test]
     fn creation_valide_construit_le_personnage_avec_equipement_de_depart() {
-        let perso = creer_personnage("Elowen", "Guerrier", VALEURS_VALIDES).unwrap();
+        let perso = creer_personnage("Elowen", "Guerrier", VALEURS_VALIDES, Pronom::Feminin).unwrap();
         assert_eq!(perso.nom, "Elowen");
         assert_eq!(perso.classe, "Guerrier");
         assert_eq!(perso.caracteristiques.force, 15);
         assert_eq!(perso.caracteristiques.charisme, 8);
         assert_eq!(perso.inventaire.len(), 2);
+        assert_eq!(perso.pronom, Pronom::Feminin);
     }
 
     #[test]

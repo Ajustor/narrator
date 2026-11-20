@@ -1,6 +1,7 @@
 use crate::caracteristiques::{modificateur, Caracteristiques};
 use crate::de::De;
 use crate::objet::{EffetObjet, Objet};
+use crate::pronom::Pronom;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -11,6 +12,10 @@ pub struct Personnage {
     pub pv_actuels: i32,
     pub pv_max: i32,
     pub inventaire: Vec<Objet>,
+    // `serde(default)` : les sauvegardes écrites avant l'ajout de ce champ
+    // n'en ont pas — sans ce défaut, les recharger échouerait.
+    #[serde(default)]
+    pub pronom: Pronom,
 }
 
 impl Personnage {
@@ -28,7 +33,17 @@ impl Personnage {
             pv_actuels: pv_max,
             pv_max,
             inventaire,
+            pronom: Pronom::default(),
         }
+    }
+
+    /// Fixe le pronom à utiliser pour parler de ce personnage (voir
+    /// `Pronom`) — distinct de `nouveau` plutôt qu'un paramètre
+    /// supplémentaire, pour ne pas casser les nombreux appels existants
+    /// (tests, fixtures) à qui le pronom est indifférent.
+    pub fn avec_pronom(mut self, pronom: Pronom) -> Self {
+        self.pronom = pronom;
+        self
     }
 
     pub fn defense(&self) -> i32 {
@@ -123,6 +138,15 @@ mod tests {
             vec![Objet::epee(), Objet::potion_de_soin()],
         );
         assert_eq!(perso.arme_equipee(), De { faces: 8 });
+    }
+
+    #[test]
+    fn une_sauvegarde_sans_champ_pronom_se_relit_avec_la_valeur_par_defaut() {
+        let perso = Personnage::nouveau("Elowen".into(), "Guerrier".into(), caracteristiques_test(), vec![]);
+        let mut valeur = serde_json::to_value(&perso).unwrap();
+        valeur.as_object_mut().unwrap().remove("pronom"); // simule une sauvegarde plus ancienne
+        let relu: Personnage = serde_json::from_value(valeur).unwrap();
+        assert_eq!(relu.pronom, Pronom::default());
     }
 
     #[test]

@@ -13,10 +13,26 @@ pub fn construire_prompt_introduction(personnage: &Personnage, lieu: &str, premi
         "Tu es le maître du jeu d'un jeu de rôle solo en français.\n\
          L'histoire se déroule dans {}.{}\n\
          Un·e {} nommé·e {} arrive à {} pour commencer son aventure.\n\
+         {}\
          Décris cette arrivée et plante le décor du monde en français, en trois ou \
          quatre phrases, sans combat, sans dialogue et sans inventer de personnage \
          non-joueur : seulement l'ambiance, le lieu et ce qui s'y trouve.",
         premisse.genre.indication_prompt(), description, personnage.classe, personnage.nom, lieu,
+        rappel_pronom(personnage),
+    )
+}
+
+/// Rappelle explicitement le pronom à utiliser pour parler du joueur, dans
+/// chaque prompt qui produit un récit (introduction et narration) : sans
+/// cette ancre, le modèle devine le pronom à partir du seul prénom,
+/// séparément à chaque phrase et à chaque appel, ce qui produisait des
+/// récits mélangeant "il" et "elle" pour le même personnage (rapport
+/// utilisateur : le narrateur se perd sur l'identité du joueur).
+fn rappel_pronom(personnage: &Personnage) -> String {
+    format!(
+        "Le pronom à utiliser pour parler de {} est toujours « {} » ; ne le change jamais au fil du récit, même sur plusieurs phrases.\n",
+        personnage.nom,
+        personnage.pronom.sujet(),
     )
 }
 
@@ -128,6 +144,7 @@ pub fn construire_prompt_narration(contexte: &ContexteResultat) -> String {
         "{}\
          {}\
          {}\
+         {}\
          Le joueur a dit ou fait exactement : \"{}\"\n\
          Dans sa saisie, le texte entre astérisques (*ainsi*) décrit un geste ou une action \
          physique du joueur, et le texte sans astérisques est ce qu'il dit à voix haute ; \
@@ -150,6 +167,7 @@ pub fn construire_prompt_narration(contexte: &ContexteResultat) -> String {
         description_premisse(&contexte.etat),
         description_memoire(&contexte.etat),
         description_pnj_pertinents(&contexte.etat, &contexte.action),
+        rappel_pronom(&contexte.etat.personnage),
         contexte.saisie_joueur,
         contexte.action,
         resultat,
@@ -203,8 +221,12 @@ fn description_personnage(etat: &EtatPartie) -> String {
     };
 
     format!(
-        "Le joueur se nomme {} et a {}/{} PV ; il possède {}.\n",
-        etat.personnage.nom, etat.personnage.pv_actuels, etat.personnage.pv_max, inventaire,
+        "Le joueur se nomme {} et a {}/{} PV ; {} possède {}.\n",
+        etat.personnage.nom,
+        etat.personnage.pv_actuels,
+        etat.personnage.pv_max,
+        etat.personnage.pronom.sujet(),
+        inventaire,
     )
 }
 
@@ -313,7 +335,7 @@ fn tronquer(s: &str, max: usize) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use domain::{Caracteristiques, Combat, De, Ennemi, Genre, Objet, Personnage};
+    use domain::{Caracteristiques, Combat, De, Ennemi, Genre, Objet, Personnage, Pronom};
 
     fn personnage_test() -> Personnage {
         Personnage::nouveau(
@@ -822,5 +844,40 @@ mod tests {
         let prompt = construire_prompt_narration(&contexte);
         assert!(!prompt.contains(&longue));
         assert!(!prompt.contains(&"z".repeat(301)));
+    }
+
+    #[test]
+    fn le_prompt_de_narration_rappelle_le_pronom_du_joueur() {
+        // Sans cette ancre, le modèle devinait le pronom à partir du seul
+        // prénom, séparément à chaque phrase, ce qui produisait des récits
+        // mélangeant "il" et "elle" pour le même personnage (rapport
+        // utilisateur : le narrateur se perd sur l'identité du joueur).
+        let mut contexte = ContexteResultat {
+            etat: etat_sans_combat(),
+            action: ActionJoueur::ActionLibre { texte: "J'observe".into(), agressif: false },
+            resume_mecanique: vec![],
+            saisie_joueur: "J'observe".to_string(),
+        };
+        contexte.etat.personnage = contexte.etat.personnage.avec_pronom(Pronom::Feminin);
+        let prompt = construire_prompt_narration(&contexte);
+        assert!(prompt.contains("« elle »"));
+    }
+
+    #[test]
+    fn le_prompt_d_introduction_rappelle_le_pronom_du_joueur() {
+        let personnage = personnage_test().avec_pronom(Pronom::Feminin);
+        let premisse = PremisseHistoire::default();
+        let prompt = construire_prompt_introduction(&personnage, "Clairière", &premisse);
+        assert!(prompt.contains("« elle »"));
+    }
+
+    #[test]
+    fn le_prompt_de_classification_utilise_le_pronom_choisi() {
+        let mut etat = etat_sans_combat();
+        etat.personnage = etat.personnage.avec_pronom(Pronom::Feminin);
+        let contexte = ContexteTour { etat, saisie_joueur: "J'observe".to_string() };
+        let prompt = construire_prompt_classification(&contexte);
+        assert!(prompt.contains("elle possède"));
+        assert!(!prompt.contains("il possède"));
     }
 }
