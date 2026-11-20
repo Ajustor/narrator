@@ -498,4 +498,34 @@ mod tests {
         eprintln!("=== tour complet : {:?} ===", debut.elapsed());
         eprintln!("narration ({} caractères) : {}", resultat.narration.len(), resultat.narration);
     }
+
+    // Vérification manuelle du correctif "attente précise" (rapport
+    // utilisateur : en attendant ses compagnons, le narrateur se
+    // contentait de décrire l'attente au lieu de la faire se résoudre) —
+    // observe la narration produite pour un cas réel de ce type.
+    // NARRATEUR_MODELE=./modeles/Qwen2.5-3B-Instruct-Q4_K_M.gguf \
+    //   cargo test -p infra --release mesure_manuelle_narration_attente_precise -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn mesure_manuelle_narration_attente_precise() {
+        use super::LlamaNarrateur;
+        use application::usecases::jouer_tour::JouerTour;
+
+        let chemin = std::env::var("NARRATEUR_MODELE").expect("NARRATEUR_MODELE requis pour cette mesure");
+        let mut narrateur = LlamaNarrateur::charger(std::path::Path::new(&chemin)).expect("chargement du modèle");
+        let mut etat = etat_sans_rien();
+        let mut de_joueur = DeNonUtilise;
+        let mut de_monde = DeNonUtilise;
+
+        let resultat = JouerTour::executer(
+            &mut etat,
+            "Je regarde par la fenêtre en attendant mes compagnons",
+            &mut narrateur,
+            &mut de_joueur,
+            &mut de_monde,
+            &mut |_| {},
+        )
+        .unwrap();
+        eprintln!("narration ({} caractères) : {}", resultat.narration.len(), resultat.narration);
+    }
 }

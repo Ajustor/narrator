@@ -134,11 +134,35 @@ pub fn construire_prompt_classification(contexte: &ContexteTour) -> String {
     )
 }
 
+/// Repère si le joueur exprime une attente précise (il attend l'arrivée de
+/// quelqu'un ou de quelque chose) plutôt qu'une action passive sans objet
+/// (observer le décor, se reposer...). Décidé en Rust plutôt que confié au
+/// modèle sous forme d'exception noyée dans un paragraphe d'instructions :
+/// un modèle léger suit mal une règle conditionnelle ("si passive, reste
+/// dans l'instant, sauf si...") — deux essais avec cette exception en
+/// texte libre n'ont rien changé à la narration produite (rapport
+/// utilisateur : en attendant ses compagnons, le narrateur se contentait
+/// de décrire l'attente). Un ordre inconditionnel et distinct, choisi ici,
+/// passe nettement mieux.
+fn attente_precise_exprimee(saisie_joueur: &str) -> bool {
+    saisie_joueur.to_lowercase().contains("attend")
+}
+
 pub fn construire_prompt_narration(contexte: &ContexteResultat) -> String {
     let resultat = if contexte.resume_mecanique.is_empty() {
         "Rien de mécanique ne s'est produit.".to_string()
     } else {
         contexte.resume_mecanique.join(" ")
+    };
+    let instruction_progression = if attente_precise_exprimee(&contexte.saisie_joueur) {
+        "Le joueur attend précisément quelque chose ou quelqu'un. Ne te contente pas de décrire \
+         cette attente : fais advenir maintenant ce qu'il attend, ou surprends-le par un imprévu \
+         qui la rompt. "
+    } else {
+        "Ne fais avancer l'histoire que dans la mesure où l'action du joueur l'appelle : si \
+         elle est passive ou n'appelle aucune suite (observer, se reposer, discuter sans \
+         urgence), reste dans l'instant présent sans introduire de nouvel événement, danger ou \
+         personnage que le joueur n'a pas cherché. "
     };
     format!(
         "{}\
@@ -156,10 +180,7 @@ pub fn construire_prompt_narration(contexte: &ContexteResultat) -> String {
          en une ou deux phrases courtes, en reprenant les détails précis de la phrase du joueur \
          ci-dessus (arme, manière, formulation) plutôt qu'une version générique, sans jamais \
          contredire ces faits ni inventer d'autres chiffres. \
-         Ne fais avancer l'histoire que dans la mesure où l'action du joueur l'appelle : si elle \
-         est passive ou n'appelle aucune suite (observer, se reposer, discuter sans urgence), \
-         reste dans l'instant présent sans introduire de nouvel événement, danger ou personnage \
-         que le joueur n'a pas cherché. \
+         {}\
          Ne fais jamais parler, décider ou agir le joueur au-delà de ce qu'il a dit ou fait \
          ci-dessus : ne lui invente ni réplique, ni pensée, ni choix, ni action suivante — \
          c'est au joueur seul de décider ce qu'il dit ou fait ensuite. Raconte uniquement les \
@@ -172,6 +193,7 @@ pub fn construire_prompt_narration(contexte: &ContexteResultat) -> String {
         contexte.action,
         resultat,
         description_etat_apres_resolution(&contexte.etat),
+        instruction_progression,
     )
 }
 
@@ -681,6 +703,46 @@ mod tests {
         };
         let prompt = construire_prompt_narration(&contexte);
         assert!(prompt.contains("Ne fais avancer l'histoire que dans la mesure où l'action du joueur l'appelle"));
+    }
+
+    #[test]
+    fn le_prompt_de_narration_demande_de_resoudre_une_attente_precise_du_joueur() {
+        // Rapport utilisateur : en attendant ses compagnons près d'une
+        // fenêtre, le narrateur se contentait de décrire cette attente au
+        // lieu de faire arriver les compagnons ou de créer un événement —
+        // la consigne "reste dans l'instant présent" (passive, pas de
+        // suite) s'appliquait littéralement à "observer" sans distinguer
+        // une attente explicite d'un simple regard sans objet.
+        let contexte = ContexteResultat {
+            etat: etat_sans_combat(),
+            action: ActionJoueur::ActionLibre {
+                texte: "Je regarde par la fenêtre en attendant mes compagnons".into(),
+                agressif: false,
+            },
+            resume_mecanique: vec![],
+            saisie_joueur: "Je regarde par la fenêtre en attendant mes compagnons".to_string(),
+        };
+        let prompt = construire_prompt_narration(&contexte);
+        assert!(prompt.contains("Le joueur attend précisément quelque chose ou quelqu'un"));
+        assert!(prompt.contains("fais advenir maintenant ce qu'il attend"));
+        // La consigne "reste dans l'instant présent" (pour une action
+        // passive sans objet) ne doit PAS apparaître en même temps que la
+        // consigne d'attente — les deux se contredisent, et un modèle
+        // léger suit mal une instruction qui s'annule elle-même.
+        assert!(!prompt.contains("reste dans l'instant présent"));
+    }
+
+    #[test]
+    fn le_prompt_de_narration_ne_declenche_pas_la_consigne_d_attente_sans_mot_cle() {
+        let contexte = ContexteResultat {
+            etat: etat_sans_combat(),
+            action: ActionJoueur::ActionLibre { texte: "J'observe le paysage".into(), agressif: false },
+            resume_mecanique: vec![],
+            saisie_joueur: "J'observe le paysage".to_string(),
+        };
+        let prompt = construire_prompt_narration(&contexte);
+        assert!(!prompt.contains("Le joueur attend précisément"));
+        assert!(prompt.contains("reste dans l'instant présent"));
     }
 
     #[test]
