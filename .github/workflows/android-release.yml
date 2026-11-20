@@ -63,11 +63,21 @@ jobs:
             "build-tools;${BUILD_TOOLS_VERSION}" \
             "platforms;${PLATFORM_VERSION}"
 
-      - name: Installer les dépendances système (ImageMagick, cmake, libclang)
-        # cmake et libclang sont requis par llama-cpp-sys-2 (cmake pour
-        # compiler llama.cpp, libclang par bindgen pour générer les
-        # liaisons Rust) — jamais garanti présent sur l'image du runner.
-        run: sudo apt-get update && sudo apt-get install -y imagemagick cmake libclang-dev clang
+      - name: Installer les dépendances système
+        # cmake et libclang : requis par llama-cpp-sys-2 (cmake compile
+        # llama.cpp, libclang sert à bindgen pour générer les liaisons
+        # Rust). imagemagick : requis par patch_icone_android.sh. Le
+        # reste (gtk/webkit2gtk/appindicator/rsvg/xdo) : requis par la
+        # pile desktop de Dioxus (wry/tao) — `cargo test --features
+        # plateforme-desktop` la compile même si la suite ne lance aucune
+        # fenêtre. Rien de tout cela n'est garanti présent sur l'image du
+        # runner.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            imagemagick cmake libclang-dev clang \
+            libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev \
+            librsvg2-dev libxdo-dev libssl-dev patchelf
 
       - name: Installer dx (dioxus-cli)
         run: cargo install dioxus-cli --version "${DX_VERSION}" --locked
