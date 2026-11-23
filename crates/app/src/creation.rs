@@ -1,7 +1,5 @@
 use application::ports::generateur_de::GenerateurDe;
-use application::usecases::creer_personnage::{
-    creer_personnage, tirer_valeurs_caracteristiques, CLASSES_VALIDES,
-};
+use application::usecases::creer_personnage::{creer_personnage, tirer_valeurs_caracteristiques};
 use domain::{Personnage, Pronom};
 use std::io::{self, Write};
 
@@ -39,24 +37,12 @@ fn lire_ligne_non_vide(invite: &str) -> String {
         if !ligne.is_empty() {
             return ligne;
         }
-        println!("Le nom ne peut pas être vide.");
+        println!("La réponse ne peut pas être vide.");
     }
 }
 
 fn lire_classe() -> String {
-    loop {
-        println!("Classes disponibles : {}", CLASSES_VALIDES.join(", "));
-        print!("Choisis une classe : ");
-        io::stdout().flush().ok();
-        let mut ligne = String::new();
-        let octets_lus = io::stdin().read_line(&mut ligne).expect("lecture échouée");
-        quitter_si_fin_d_entree(octets_lus);
-        let choix = ligne.trim().to_string();
-        if CLASSES_VALIDES.contains(&choix.as_str()) {
-            return choix;
-        }
-        println!("Classe invalide.");
-    }
+    lire_ligne_non_vide("Classe de ton personnage (libre, ex. Guerrier, Barde, Alchimiste...) : ")
 }
 
 fn lire_pronom() -> Pronom {

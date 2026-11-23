@@ -1,4 +1,3 @@
-use application::usecases::creer_personnage::CLASSES_VALIDES;
 use dioxus::prelude::*;
 use domain::{Genre, Pronom};
 
@@ -18,7 +17,7 @@ pub fn Creation(
     sur_creation: EventHandler<MessageVersWorker>,
 ) -> Element {
     let mut nom = use_signal(String::new);
-    let mut classe = use_signal(|| CLASSES_VALIDES[0].to_string());
+    let mut classe = use_signal(String::new);
     // Pour chaque caractéristique (Force, Dextérité, ...), l'INDEX dans
     // `valeurs_proposees` qui lui a été attribué (pas la valeur elle-même).
     let mut origines = use_signal(|| [None::<usize>; 6]);
@@ -73,12 +72,10 @@ pub fn Creation(
                 }
                 div { class: "champ",
                     label { "Classe : " }
-                    select {
+                    input {
+                        placeholder: "Guerrier, Barde, Alchimiste...",
                         value: "{classe}",
-                        onchange: move |evt| classe.set(evt.value()),
-                        for c in CLASSES_VALIDES.iter() {
-                            option { key: "{c}", value: "{c}", "{c}" }
-                        }
+                        oninput: move |evt| classe.set(evt.value()),
                     }
                 }
                 div { class: "champ",
@@ -163,12 +160,15 @@ pub fn Creation(
                 }
                 button {
                     class: "bouton-principal",
-                    disabled: chargement || nom().trim().is_empty() || !toutes_valeurs_choisies(),
+                    disabled: chargement
+                        || nom().trim().is_empty()
+                        || classe().trim().is_empty()
+                        || !toutes_valeurs_choisies(),
                     onclick: move |_| {
                         let valeurs = origines().map(|o| o.map(|i| valeurs_proposees[i]).unwrap_or(0));
                         sur_creation.call(MessageVersWorker::CreerPersonnage {
                             nom: nom().trim().to_string(),
-                            classe: classe(),
+                            classe: classe().trim().to_string(),
                             valeurs,
                             palette_modele: palette(),
                             genre: genre(),

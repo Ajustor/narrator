@@ -1,8 +1,6 @@
 use crate::ports::generateur_de::GenerateurDe;
 use domain::{Caracteristiques, De, Objet, Personnage, Pronom};
 
-pub const CLASSES_VALIDES: [&str; 3] = ["Guerrier", "Mage", "Voleur"];
-
 /// Bornes d'une caractéristique tirée via `tirer_valeurs_caracteristiques`
 /// (méthode "4d6, on retire le plus petit") : minimum 1+1+1=3, maximum
 /// 6+6+6=18. `creer_personnage` valide chaque valeur contre ces bornes
@@ -14,7 +12,7 @@ const CARACTERISTIQUE_MAX: u32 = 18;
 #[derive(Debug, PartialEq)]
 pub enum ErreurCreationPersonnage {
     NomVide,
-    ClasseInvalide,
+    ClasseVide,
     ValeursCaracteristiquesInvalides,
 }
 
@@ -41,8 +39,8 @@ pub fn creer_personnage(
     if nom.trim().is_empty() {
         return Err(ErreurCreationPersonnage::NomVide);
     }
-    if !CLASSES_VALIDES.contains(&classe) {
-        return Err(ErreurCreationPersonnage::ClasseInvalide);
+    if classe.trim().is_empty() {
+        return Err(ErreurCreationPersonnage::ClasseVide);
     }
     if valeurs.iter().any(|v| *v < CARACTERISTIQUE_MIN || *v > CARACTERISTIQUE_MAX) {
         return Err(ErreurCreationPersonnage::ValeursCaracteristiquesInvalides);
@@ -82,9 +80,16 @@ mod tests {
     }
 
     #[test]
-    fn classe_invalide_est_rejetee() {
+    fn classe_vide_est_rejetee() {
+        let resultat = creer_personnage("Elowen", "  ", VALEURS_VALIDES, Pronom::Masculin);
+        assert_eq!(resultat, Err(ErreurCreationPersonnage::ClasseVide));
+    }
+
+    #[test]
+    fn classe_libre_est_acceptee() {
         let resultat = creer_personnage("Elowen", "Barde", VALEURS_VALIDES, Pronom::Masculin);
-        assert_eq!(resultat, Err(ErreurCreationPersonnage::ClasseInvalide));
+        assert!(resultat.is_ok());
+        assert_eq!(resultat.unwrap().classe, "Barde");
     }
 
     #[test]
